@@ -384,7 +384,7 @@ const ApplicationPortal = () => {
       });
 
       try {
-        const res = await axios.post('http://localhost:3000/submit', data, {
+        const res = await axios.post('https://hope-haven-server.vercel.app/submit', data, {
           headers: { 'Content-Type': 'multipart/form-data' }
         });
         alert(res.data);
