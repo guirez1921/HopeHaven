@@ -2,8 +2,12 @@ const express = require('express');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const path = require('path');
+const cors = require('cors');   // 👈 import cors
 
 const app = express();
+
+// Enable CORS for all routes
+app.use(cors());
 
 // Multer setup
 const storage = multer.memoryStorage();
@@ -20,7 +24,6 @@ const uploadFields = upload.fields([
 app.get('/', (req, res) => {
     res.status(200).send('✅ Express backend is running on Vercel!');
 });
-
 
 app.post('/submit', uploadFields, async (req, res) => {
     try {
