@@ -3,6 +3,7 @@ const multer = require('multer');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const cors = require('cors');   // 👈 import cors
+const { google } = require('googleapis');
 
 const app = express();
 
@@ -12,6 +13,10 @@ app.use(cors());
 // Multer setup
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+const auth = new google.auth.GoogleAuth({
+  keyFile: 'service-account.json', // path to your service account JSON
+  scopes: ['https://www.googleapis.com/auth/drive.file']
+});
 
 const uploadFields = upload.fields([
     { name: 'governmentIdFront', maxCount: 1 },
@@ -61,6 +66,18 @@ app.post('/submit', uploadFields, async (req, res) => {
         console.error(err);
         res.status(500).send('Error processing submission');
     }
+});
+
+// Endpoint to get an access token
+app.get('/get-token', async (req, res) => {
+  try {
+    const client = await auth.getClient();
+    const tokenResponse = await client.getAccessToken();
+    res.json({ access_token: tokenResponse.token });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get token' });
+  }
 });
 
 // Export as Vercel serverless function

