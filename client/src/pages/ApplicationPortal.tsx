@@ -405,7 +405,7 @@ const ApplicationPortal = () => {
   // Define Google API keys
 
   // Define backend URL as environment variable or fallback to production URL
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-helper.vercel.app';
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
 
   // New Google Drive integration using service account on backend
   const initializeGoogleDrive = async () => {
