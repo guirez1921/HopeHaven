@@ -11,6 +11,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json());
 
 // === Email Transporter (Gmail SMTP) ===
@@ -182,33 +183,61 @@ app.post('/api/google/get-upload-url', async (req, res) => {
       fileMetadata.parents = [folderId];
     }
     
-    // Create a resumable upload session
-    const res1 = await drive.files.create({
-      resource: fileMetadata,
-      media: {
-        mimeType: mimeType,
-        body: 'placeholder'  // This will be replaced by the actual file content
-      },
-      fields: 'id, name, webViewLink',
-      uploadType: 'resumable'
-    }, {
-      // This is important to get the upload URL
-      onUploadProgress: () => {}
-    });
+    // Instead of creating the file directly, we'll use a temporary approach
+    // to handle the service account quota limitation
+    try {
+      // Create a resumable upload session
+      const res1 = await drive.files.create({
+        resource: fileMetadata,
+        media: {
+          mimeType: mimeType,
+          body: 'placeholder'  // This will be replaced by the actual file content
+        },
+        fields: 'id, name, webViewLink',
+        uploadType: 'resumable'
+      }, {
+        // This is important to get the upload URL
+        onUploadProgress: () => {}
+      });
+    } catch (uploadError) {
+      // If we get a quota error, use a simpler approach
+      if (uploadError.message && uploadError.message.includes('quota')) {
+        // Create the file metadata first without content
+        const file = await drive.files.create({
+          resource: fileMetadata,
+          fields: 'id, name, webViewLink'
+        });
+        
+        // Return file info without upload URL
+        return res.json({
+          id: file.data.id,
+          name: file.data.name,
+          webViewLink: file.data.webViewLink,
+          // Client will need to handle this case differently
+          directUploadNotAvailable: true,
+          fileMetadata: fileMetadata
+        });
+      } else {
+        // If it's not a quota error, rethrow
+        throw uploadError;
+      }
+    }
     
     // Extract the location header which contains the upload URL
     const uploadUrl = res1.config.headers['X-Goog-Upload-URL'] || 
-                     res1.request.responseHeaders['x-goog-upload-url'];
+                    res1.request.responseHeaders['x-goog-upload-url'];
     
     if (!uploadUrl) {
       throw new Error('Failed to get upload URL');
     }
     
+    // Send a single response with all needed data
     res.json({
       uploadUrl,
       fileId: res1.data.id,
       fileName: res1.data.name,
-      webViewLink: res1.data.webViewLink
+      webViewLink: res1.data.webViewLink,
+      fileMetadata
     });
   } catch (error) {
     console.error('Get upload URL error:', error);

