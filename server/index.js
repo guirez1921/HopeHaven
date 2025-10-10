@@ -141,7 +141,8 @@ app.post('/api/google/create-folder', async (req, res) => {
     // Create folder
     const folderMetadata = {
       name: folderName,
-      mimeType: 'application/vnd.google-apps.folder'
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: '1orU5vM9h49_q2zNr-Vi2S1aRKmfA-upb'
     };
     
     const folder = await drive.files.create({
@@ -175,7 +176,8 @@ app.post('/api/google/get-upload-url', async (req, res) => {
     // Prepare file metadata
     const fileMetadata = {
       name: fileName,
-      mimeType: mimeType
+      mimeType: mimeType,
+      
     };
     
     // If folder ID is provided, add it as parent
