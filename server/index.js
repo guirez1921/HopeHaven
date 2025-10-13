@@ -94,15 +94,31 @@ app.post('/api/log', async (req, res) => {
 // Initialize Google Service Account Auth
 let auth;
 try {
-  const serviceAccountJson = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
+  // Parse the service account JSON and handle potential formatting issues
+  let serviceAccountJson;
+  try {
+    serviceAccountJson = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
+    
+    // Ensure private_key is properly formatted (sometimes newlines get escaped)
+    if (serviceAccountJson.private_key && serviceAccountJson.private_key.includes('\\n')) {
+      serviceAccountJson.private_key = serviceAccountJson.private_key.replace(/\\n/g, '\n');
+    }
+  } catch (parseError) {
+    console.error('Error parsing service account JSON:', parseError);
+    throw new Error('Invalid service account JSON format');
+  }
+  
+  // Validate required fields
+  if (!serviceAccountJson.client_email || !serviceAccountJson.private_key) {
+    throw new Error('Missing required service account credentials (client_email or private_key)');
+  }
   
   // Using the JWT constructor directly instead of deprecated methods
-  const jwt = new google.auth.JWT(
-    serviceAccountJson.client_email,
-    null,
-    serviceAccountJson.private_key,
-    ['https://www.googleapis.com/auth/drive']
-  );
+  const jwt = new google.auth.JWT({
+    email: serviceAccountJson.client_email,
+    key: serviceAccountJson.private_key,
+    scopes: ['https://www.googleapis.com/auth/drive']
+  });
   
   auth = jwt;
 } catch (error) {
