@@ -256,42 +256,39 @@ app.post('/api/google/resumable-upload', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    // Get Drive client with service account
     const drive = await getDriveClient();
 
-    // Prepare file metadata
+    // Prepare metadata
     const fileMetadata = {
       name: fileName,
       mimeType,
     };
+    if (folderId) fileMetadata.parents = [folderId];
 
-    if (folderId) {
-      fileMetadata.parents = [folderId];
-    }
-
-    // Step 1: Initiate resumable upload session
-    const uploadSession = await drive.files.create(
+    // Initiate resumable session
+    const response = await drive.files.create(
       {
         requestBody: fileMetadata,
         media: { mimeType },
       },
       {
-        // This is the magic part that tells Google we want a resumable session
         params: { uploadType: 'resumable' },
         headers: {
           'X-Upload-Content-Type': mimeType,
         },
+        // 👇 Important: tell Google API client to return full response (not just data)
+        responseType: 'json',
       }
     );
 
-    // Step 2: Get the upload URL from response headers
-    const uploadUrl = uploadSession.headers.location;
+    // 👇 This header is the actual upload session URL
+    const uploadUrl = response?.headers?.location;
 
     if (!uploadUrl) {
-      throw new Error('Failed to get resumable upload URL');
+      console.error('Resumable upload headers:', response.headers);
+      throw new Error('Failed to get resumable upload URL — no Location header found.');
     }
 
-    // Return resumable upload URL & metadata to client
     return res.json({
       uploadUrl,
       fileMetadata,
@@ -321,7 +318,6 @@ app.post('/api/google/resumable-upload', async (req, res) => {
     });
   }
 });
-
 
 // Endpoint to verify if a folder exists and is accessible
 app.post('/api/google/verify-folder', async (req, res) => {
