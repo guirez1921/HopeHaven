@@ -116,11 +116,17 @@ const getDriveClient = async () => {
       throw new Error('Google auth not initialized');
     }
     
-    // No need to call getClient() with JWT
-    return google.drive({ version: 'v3', auth });
+    // Explicitly authorize the JWT token before using it
+    await auth.authorize();
+    
+    // Create and return the drive client with the authorized token
+    return google.drive({ 
+      version: 'v3', 
+      auth: auth 
+    });
   } catch (error) {
     console.error('Error getting Drive client:', error);
-    throw new Error('Failed to initialize Google Drive client');
+    throw new Error(`Failed to initialize Google Drive client: ${error.message}`);
   }
 };
 
