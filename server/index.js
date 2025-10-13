@@ -193,7 +193,7 @@ app.post('/api/google/create-folder', async (req, res) => {
   }
 });
 
-// Endpoint to get upload URL for direct upload using service account
+// Endpoint to get upload URL for direct upload using service account (legacy method)
 app.post('/api/google/get-upload-url', async (req, res) => {
   try {
     const { fileName, folderId, mimeType } = req.body;
@@ -240,6 +240,76 @@ app.post('/api/google/get-upload-url', async (req, res) => {
       return res.status(404).json({ 
         error: 'Folder not found or not accessible. Please check if the folder ID is correct.',
         details: error.message
+      });
+    }
+    
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// New endpoint for resumable uploads
+app.post('/api/google/resumable-upload', async (req, res) => {
+  try {
+    const { fileName, folderId, mimeType } = req.body;
+    
+    if (!fileName || !mimeType) {
+      return res.status(400).json({ error: 'File name and MIME type are required' });
+    }
+
+    // Get Drive client with service account
+    const drive = await getDriveClient();
+    
+    // Prepare file metadata
+    const fileMetadata = {
+      name: fileName,
+      mimeType: mimeType,
+    };
+    
+    // If folder ID is provided, add it as parent
+    if (folderId) {
+      fileMetadata.parents = [folderId];
+    }
+    
+    // Create a resumable upload session
+    const response = await drive.files.create({
+      resource: fileMetadata,
+      fields: 'id, name, webViewLink',
+      media: { mimeType },
+      uploadType: 'resumable',
+    });
+    
+    // Extract the resumable session URL
+    const uploadUrl = response.headers?.location || response.config?.headers?.Location;
+    
+    if (!uploadUrl) {
+      throw new Error('Failed to get resumable upload URL');
+    }
+    
+    return res.json({
+      uploadUrl,
+      id: response.data.id,
+      name: response.data.name,
+      webViewLink: response.data.webViewLink,
+      resumable: true,
+      message: 'Resumable upload URL generated successfully',
+    });
+  } catch (error) {
+    console.error('Resumable upload error:', error);
+    
+    // Check if the error is related to the folder
+    if (error.message && (error.message.includes('notFound') || error.message.includes('folder'))) {
+      return res.status(404).json({ 
+        error: 'Folder not found or not accessible. Please check if the folder ID is correct.',
+        details: error.message
+      });
+    }
+    
+    // Check for quota limitations
+    if (error.message && error.message.includes('quota')) {
+      return res.status(429).json({
+        error: 'Service account quota limitation reached',
+        details: error.message,
+        message: 'Upload failed due to Google Drive API quota limitations. Please try again later.'
       });
     }
     

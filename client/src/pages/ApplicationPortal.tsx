@@ -508,6 +508,55 @@ const ApplicationPortal = () => {
     }
   };
 
+  const resumableUploadFile = async (file: File, folderId: string) => {
+    try {
+      // Step 1: Get the resumable upload URL from our new endpoint
+      const response = await fetch(`${BACKEND_URL}/api/google/resumable-upload`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: file.type,
+          folderId: folderId
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(`Failed to get upload URL: ${response.status} ${response.statusText}${errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''}`);
+      }
+
+      const data = await response.json();
+      const { uploadUrl, fileMetadata } = data;
+
+      if (!uploadUrl) {
+        throw new Error('No upload URL returned from server');
+      }
+
+      // Step 2: Upload the file directly to Google Drive using the URL
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type,
+        },
+        body: file,
+      });
+
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.text().catch(() => null);
+        throw new Error(`Failed to upload file content: ${uploadResponse.status} ${uploadResponse.statusText}${errorData ? ` - ${errorData}` : ''}`);
+      }
+
+      // Return the file metadata for consistency with uploadFile
+      return fileMetadata;
+    } catch (error: any) {
+      console.error(`Resumable upload error for ${file.name}:`, error);
+      throw new Error(`Failed to upload ${file.name} using resumable upload: ${error.message || 'Unknown error'}`);
+    }
+  };
+
   const logToBackend = async (logData: any) => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/log`, {
@@ -585,8 +634,20 @@ const ApplicationPortal = () => {
             { type: fileType }
           );
 
-          console.log(`Uploading file ${i + 1}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
-          const uploadedFile = await uploadFile(fileToUpload, folder.id);
+          console.log(`Uploading file ${i + 1} using resumable upload:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
+          
+          // Try resumable upload first
+          let uploadedFile;
+          try {
+            uploadedFile = await resumableUploadFile(fileToUpload, folder.id);
+            console.log(`Resumable upload successful for ${fileToUpload.name}`);
+          } catch (resumableError) {
+            // If resumable upload fails, fall back to normal upload
+            console.warn(`Resumable upload failed for ${fileToUpload.name}, falling back to normal upload:`, resumableError);
+            uploadedFile = await uploadFile(fileToUpload, folder.id);
+            console.log(`Normal upload successful for ${fileToUpload.name}`);
+          }
+          
           uploadedFiles.push({
             name: uploadedFile.name,
             url: uploadedFile.webViewLink,
@@ -594,8 +655,9 @@ const ApplicationPortal = () => {
             fieldName: fieldName
           });
           setProgress(30 + (i + 1) * progressPerFile);
-        } catch (fileError: any) {
-          console.error(`Error uploading file ${i + 1}:`, fileError);
+        } catch (error: any) {
+          // Both upload methods failed
+          console.error(`All upload methods failed for file ${i + 1}:`, error);
           // Continue with other files even if one fails
         }
       }
