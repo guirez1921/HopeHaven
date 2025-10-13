@@ -378,7 +378,7 @@ const ApplicationPortal = () => {
       if (!response.ok) {
         throw new Error(`Failed to initialize Drive API: ${response.status} ${response.statusText}`);
       }
-      
+
       // No tokens needed anymore, just return success
       return "SERVICE_ACCOUNT";
     } catch (error: any) {
@@ -409,6 +409,32 @@ const ApplicationPortal = () => {
     }
   };
 
+  // Example client-side code
+  const checkFolder = async (folderId: string) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/google/verify-folder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ folderId: folderId })
+      });
+
+      const result = await response.json();
+
+      if (result.valid && result.canUpload) {
+        console.log(`Folder "${result.folderName}" is valid and accessible for uploads`);
+        return true;
+      } else {
+        console.error(`Folder issue: ${result.error || 'Cannot upload to this folder'}`);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error checking folder:', error);
+      return false;
+    }
+  }
+
   const uploadFile = async (file: File, folderId: string) => {
     if (!file) {
       throw new Error('File is required for upload');
@@ -422,9 +448,9 @@ const ApplicationPortal = () => {
       // Make sure we have valid file name and type
       const fileName = file.name || `file_${Date.now()}`;
       const mimeType = file.type || 'application/octet-stream';
-      
+
       console.log('Uploading file:', { fileName, folderId, mimeType });
-      
+
       // Step 1: Get upload URL and metadata from backend (using service account)
       const uploadInfoResponse = await fetch(`${BACKEND_URL}/api/google/get-upload-url`, {
         method: 'POST',
@@ -471,9 +497,8 @@ const ApplicationPortal = () => {
 
       if (!uploadResponse.ok) {
         const errorData = await uploadResponse.json().catch(() => null);
-        throw new Error(`Failed to upload ${file.name}: ${uploadResponse.status} ${uploadResponse.statusText}${
-          errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''
-        }`);
+        throw new Error(`Failed to upload ${file.name}: ${uploadResponse.status} ${uploadResponse.statusText}${errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''
+          }`);
       }
 
       return await uploadResponse.json();
@@ -522,6 +547,10 @@ const ApplicationPortal = () => {
       const folderName = `${formData.firstName}_${timestamp}`;
       const folder = await createFolder(folderName);
       setProgress(30);
+      const folderValid = await checkFolder(folder.id);
+      if (!folderValid) {
+        throw new Error('Folder validation failed. Please check folder permissions.');
+      }
 
       // 3. Upload all files to Drive directly using service account
       const uploadedFiles: any[] = [];
@@ -543,19 +572,19 @@ const ApplicationPortal = () => {
       for (let i = 0; i < documentFiles.length; i++) {
         try {
           const { file, fieldName } = documentFiles[i];
-          
+
           // Create a properly named file object instead of trying to modify the original
           const fileName = file.name || `${fieldName}_${Date.now()}`;
           const fileType = file.type || 'application/octet-stream';
-          
+
           // Create a new File object with the proper name and type
           const fileToUpload = new File(
-            [file], 
+            [file],
             fileName,
             { type: fileType }
           );
-          
-          console.log(`Uploading file ${i+1}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
+
+          console.log(`Uploading file ${i + 1}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
           const uploadedFile = await uploadFile(fileToUpload, folder.id);
           uploadedFiles.push({
             name: uploadedFile.name,

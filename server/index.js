@@ -247,6 +247,63 @@ app.post('/api/google/get-upload-url', async (req, res) => {
   }
 });
 
+// Endpoint to verify if a folder exists and is accessible
+app.post('/api/google/verify-folder', async (req, res) => {
+  try {
+    const { folderId } = req.body;
+    
+    if (!folderId) {
+      return res.status(400).json({ error: 'Folder ID is required' });
+    }
+
+    // Get Drive client with service account
+    const drive = await getDriveClient();
+    
+    // Try to get the folder metadata
+    const response = await drive.files.get({
+      fileId: folderId,
+      fields: 'id, name, mimeType, capabilities'
+    });
+    
+    // Check if it's actually a folder
+    const isFolder = response.data.mimeType === 'application/vnd.google-apps.folder';
+    
+    // Check if we have write permissions
+    const canUpload = response.data.capabilities && 
+                     (response.data.capabilities.canAddChildren === true);
+    
+    res.json({
+      valid: isFolder,
+      canUpload: canUpload,
+      folderName: response.data.name,
+      folderId: response.data.id
+    });
+  } catch (error) {
+    console.error('Folder verification error:', error);
+    
+    // Check for specific error types
+    if (error.code === 404) {
+      return res.status(404).json({ 
+        valid: false, 
+        error: 'Folder not found' 
+      });
+    }
+    
+    if (error.code === 403) {
+      return res.status(403).json({ 
+        valid: true, 
+        canUpload: false, 
+        error: 'No permission to access this folder' 
+      });
+    }
+    
+    res.status(500).json({ 
+      valid: false, 
+      error: error.message 
+    });
+  }
+});
+
 // Health check
 app.get('/', (req, res) => {
     res.send('✅ Express backend is running on Vercel!');
