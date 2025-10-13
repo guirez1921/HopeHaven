@@ -251,76 +251,77 @@ app.post('/api/google/get-upload-url', async (req, res) => {
 app.post('/api/google/resumable-upload', async (req, res) => {
   try {
     const { fileName, folderId, mimeType } = req.body;
-    
+
     if (!fileName || !mimeType) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
     // Get Drive client with service account
     const drive = await getDriveClient();
-    
+
     // Prepare file metadata
     const fileMetadata = {
       name: fileName,
+      mimeType,
     };
-    
-    // If folder ID is provided, add it as parent
+
     if (folderId) {
       fileMetadata.parents = [folderId];
     }
-    
-    // Create file metadata first to get the file ID
-    const fileResponse = await drive.files.create({
-      requestBody: fileMetadata,
-      fields: 'id, name, webViewLink',
-    });
-    
-    const fileId = fileResponse.data.id;
-    
-    if (!fileId) {
-      throw new Error('Failed to create file metadata');
+
+    // Step 1: Initiate resumable upload session
+    const uploadSession = await drive.files.create(
+      {
+        requestBody: fileMetadata,
+        media: { mimeType },
+      },
+      {
+        // This is the magic part that tells Google we want a resumable session
+        params: { uploadType: 'resumable' },
+        headers: {
+          'X-Upload-Content-Type': mimeType,
+        },
+      }
+    );
+
+    // Step 2: Get the upload URL from response headers
+    const uploadUrl = uploadSession.headers.location;
+
+    if (!uploadUrl) {
+      throw new Error('Failed to get resumable upload URL');
     }
-    
-    // Generate a direct upload URL for the created file
-    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
-    
-    // Return both the upload URL and file metadata
+
+    // Return resumable upload URL & metadata to client
     return res.json({
       uploadUrl,
-      fileMetadata: {
-        id: fileResponse.data.id,
-        name: fileResponse.data.name,
-        webViewLink: fileResponse.data.webViewLink,
-      },
+      fileMetadata,
       resumable: true,
-      message: 'Resumable upload URL generated successfully',
+      message: 'Resumable upload session created successfully',
     });
   } catch (error) {
-    console.error('Resumable upload error:', error);
-    
-    // Check if the error is related to the folder
-    if (error.message && (error.message.includes('notFound') || error.message.includes('folder'))) {
+    console.error('Resumable upload error:', error.message || error);
+
+    if (error.message?.includes('notFound') || error.message?.includes('folder')) {
       return res.status(404).json({
         error: 'Folder not found or inaccessible',
-        message: error.message
+        message: error.message,
       });
     }
-    
-    // Check for quota limitations
-    if (error.message && error.message.includes('quota')) {
+
+    if (error.message?.includes('quota')) {
       return res.status(429).json({
         error: 'Service account quota limitation reached',
-        details: error.message,
-        message: 'Upload failed due to Google Drive API quota limitations. Please try again later.'
+        message: 'Upload failed due to Google Drive API quota limitations. Please try again later.',
       });
     }
-    
+
     return res.status(500).json({
       error: 'Failed to create resumable upload session',
-      message: error.message
+      message: error.message,
     });
   }
 });
+
 
 // Endpoint to verify if a folder exists and is accessible
 app.post('/api/google/verify-folder', async (req, res) => {

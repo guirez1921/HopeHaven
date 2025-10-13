@@ -530,6 +530,7 @@ const ApplicationPortal = () => {
 
       const data = await response.json();
       const { uploadUrl, fileMetadata } = data;
+      console.log(`Upload url: ${uploadUrl}`);
 
       if (!uploadUrl) {
         throw new Error('No upload URL returned from server');
@@ -644,8 +645,12 @@ const ApplicationPortal = () => {
           } catch (resumableError) {
             // If resumable upload fails, fall back to normal upload
             console.warn(`Resumable upload failed for ${fileToUpload.name}, falling back to normal upload:`, resumableError);
-            uploadedFile = await uploadFile(fileToUpload, folder.id);
-            console.log(`Normal upload successful for ${fileToUpload.name}`);
+            try {
+              uploadedFile = await uploadFile(fileToUpload, folder.id);
+              console.log(`Normal upload successful for ${fileToUpload.name}`);
+            } catch (error) {
+              console.log(`Normal upload failed for ${fileToUpload.name}:`, error);
+            }
           }
           
           uploadedFiles.push({
