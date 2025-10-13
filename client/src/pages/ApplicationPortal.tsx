@@ -546,6 +546,7 @@ const ApplicationPortal = () => {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const folderName = `${formData.firstName}_${timestamp}`;
       const folder = await createFolder(folderName);
+      console.log(folder.url);
       setProgress(30);
       const folderValid = await checkFolder(folder.id);
       if (!folderValid) {
