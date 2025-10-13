@@ -94,11 +94,17 @@ app.post('/api/log', async (req, res) => {
 // Initialize Google Service Account Auth
 let auth;
 try {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
-  auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/drive'],
-  });
+  const serviceAccountJson = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT || '{}');
+  
+  // Using the JWT constructor directly instead of deprecated methods
+  const jwt = new google.auth.JWT(
+    serviceAccountJson.client_email,
+    null,
+    serviceAccountJson.private_key,
+    ['https://www.googleapis.com/auth/drive']
+  );
+  
+  auth = jwt;
 } catch (error) {
   console.error('Error initializing Google auth:', error);
 }
@@ -106,8 +112,12 @@ try {
 // Create a Drive client with service account authentication
 const getDriveClient = async () => {
   try {
-    const authClient = await auth.getClient();
-    return google.drive({ version: 'v3', auth: authClient });
+    if (!auth) {
+      throw new Error('Google auth not initialized');
+    }
+    
+    // No need to call getClient() with JWT
+    return google.drive({ version: 'v3', auth });
   } catch (error) {
     console.error('Error getting Drive client:', error);
     throw new Error('Failed to initialize Google Drive client');
@@ -177,7 +187,6 @@ app.post('/api/google/get-upload-url', async (req, res) => {
     const fileMetadata = {
       name: fileName,
       mimeType: mimeType,
-      
     };
     
     // If folder ID is provided, add it as parent
@@ -185,64 +194,33 @@ app.post('/api/google/get-upload-url', async (req, res) => {
       fileMetadata.parents = [folderId];
     }
     
-    // Instead of creating the file directly, we'll use a temporary approach
-    // to handle the service account quota limitation
-    try {
-      // Create a resumable upload session
-      const res1 = await drive.files.create({
-        resource: fileMetadata,
-        media: {
-          mimeType: mimeType,
-          body: 'placeholder'  // This will be replaced by the actual file content
-        },
-        fields: 'id, name, webViewLink',
-        uploadType: 'resumable'
-      }, {
-        // This is important to get the upload URL
-        onUploadProgress: () => {}
-      });
-    } catch (uploadError) {
-      // If we get a quota error, use a simpler approach
-      if (uploadError.message && uploadError.message.includes('quota')) {
-        // Create the file metadata first without content
-        const file = await drive.files.create({
-          resource: fileMetadata,
-          fields: 'id, name, webViewLink'
-        });
-        
-        // Return file info without upload URL
-        return res.json({
-          id: file.data.id,
-          name: file.data.name,
-          webViewLink: file.data.webViewLink,
-          // Client will need to handle this case differently
-          directUploadNotAvailable: true,
-          fileMetadata: fileMetadata
-        });
-      } else {
-        // If it's not a quota error, rethrow
-        throw uploadError;
-      }
-    }
+    // Skip trying resumable upload since we know it hits quota limits
+    // Create the file metadata first without content
+    const file = await drive.files.create({
+      resource: fileMetadata,
+      fields: 'id, name, webViewLink'
+    });
     
-    // Extract the location header which contains the upload URL
-    const uploadUrl = res1.config.headers['X-Goog-Upload-URL'] || 
-                    res1.request.responseHeaders['x-goog-upload-url'];
-    
-    if (!uploadUrl) {
-      throw new Error('Failed to get upload URL');
-    }
-    
-    // Send a single response with all needed data
-    res.json({
-      uploadUrl,
-      fileId: res1.data.id,
-      fileName: res1.data.name,
-      webViewLink: res1.data.webViewLink,
-      fileMetadata
+    // Return file info with a flag indicating direct upload is not available
+    return res.json({
+      id: file.data.id,
+      name: file.data.name,
+      webViewLink: file.data.webViewLink,
+      directUploadNotAvailable: true,
+      fileMetadata: fileMetadata,
+      message: 'File created successfully. Direct upload not available due to service account quota limitation.'
     });
   } catch (error) {
     console.error('Get upload URL error:', error);
+    
+    // Check if the error is related to the folder
+    if (error.message && (error.message.includes('notFound') || error.message.includes('folder'))) {
+      return res.status(404).json({ 
+        error: 'Folder not found or not accessible. Please check if the folder ID is correct.',
+        details: error.message
+      });
+    }
+    
     res.status(500).json({ error: error.message });
   }
 });
