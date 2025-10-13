@@ -253,7 +253,7 @@ app.post('/api/google/resumable-upload', async (req, res) => {
     const { fileName, folderId, mimeType } = req.body;
     
     if (!fileName || !mimeType) {
-      return res.status(400).json({ error: 'File name and MIME type are required' });
+      return res.status(400).json({ error: 'Missing required parameters' });
     }
 
     // Get Drive client with service account
@@ -262,7 +262,6 @@ app.post('/api/google/resumable-upload', async (req, res) => {
     // Prepare file metadata
     const fileMetadata = {
       name: fileName,
-      mimeType: mimeType,
     };
     
     // If folder ID is provided, add it as parent
@@ -270,26 +269,29 @@ app.post('/api/google/resumable-upload', async (req, res) => {
       fileMetadata.parents = [folderId];
     }
     
-    // Create a resumable upload session
-    const response = await drive.files.create({
-      resource: fileMetadata,
+    // Create file metadata first to get the file ID
+    const fileResponse = await drive.files.create({
+      requestBody: fileMetadata,
       fields: 'id, name, webViewLink',
-      media: { mimeType },
-      uploadType: 'resumable',
     });
     
-    // Extract the resumable session URL
-    const uploadUrl = response.headers?.location || response.config?.headers?.Location;
+    const fileId = fileResponse.data.id;
     
-    if (!uploadUrl) {
-      throw new Error('Failed to get resumable upload URL');
+    if (!fileId) {
+      throw new Error('Failed to create file metadata');
     }
     
+    // Generate a direct upload URL for the created file
+    const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=resumable`;
+    
+    // Return both the upload URL and file metadata
     return res.json({
       uploadUrl,
-      id: response.data.id,
-      name: response.data.name,
-      webViewLink: response.data.webViewLink,
+      fileMetadata: {
+        id: fileResponse.data.id,
+        name: fileResponse.data.name,
+        webViewLink: fileResponse.data.webViewLink,
+      },
       resumable: true,
       message: 'Resumable upload URL generated successfully',
     });
@@ -298,9 +300,9 @@ app.post('/api/google/resumable-upload', async (req, res) => {
     
     // Check if the error is related to the folder
     if (error.message && (error.message.includes('notFound') || error.message.includes('folder'))) {
-      return res.status(404).json({ 
-        error: 'Folder not found or not accessible. Please check if the folder ID is correct.',
-        details: error.message
+      return res.status(404).json({
+        error: 'Folder not found or inaccessible',
+        message: error.message
       });
     }
     
@@ -313,7 +315,10 @@ app.post('/api/google/resumable-upload', async (req, res) => {
       });
     }
     
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      error: 'Failed to create resumable upload session',
+      message: error.message
+    });
   }
 });
 
