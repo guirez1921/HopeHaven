@@ -152,7 +152,7 @@ app.post('/api/google/create-folder', async (req, res) => {
     const folderMetadata = {
       name: folderName,
       mimeType: 'application/vnd.google-apps.folder',
-      parents: '1orU5vM9h49_q2zNr-Vi2S1aRKmfA-upb'
+      parents: ['1orU5vM9h49_q2zNr-Vi2S1aRKmfA-upb']
     };
     
     const folder = await drive.files.create({
