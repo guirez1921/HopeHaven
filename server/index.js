@@ -281,6 +281,8 @@ app.post('/api/google/resumable-upload', async (req, res) => {
       }
     );
 
+    console.log('Resumable upload response:', response);
+
     // 👇 This header is the actual upload session URL
     const uploadUrl = response?.headers?.location;
 
