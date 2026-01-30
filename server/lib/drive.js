@@ -28,11 +28,16 @@ try {
 
 const getDriveClient = async () => {
     try {
-        if (!auth) throw new Error('Google auth not initialized');
+        console.log('🛠️ Getting Google Drive client...');
+        if (!auth) {
+            console.error('❌ Google auth not initialized');
+            throw new Error('Google auth not initialized');
+        }
         await auth.authorize();
+        console.log('✅ Google Drive auth authorized');
         return google.drive({ version: 'v3', auth });
     } catch (error) {
-        console.error('Error getting Drive client:', error);
+        console.error('❌ Error getting Drive client:', error);
         throw new Error(`Failed to initialize Google Drive client: ${error.message}`);
     }
 };

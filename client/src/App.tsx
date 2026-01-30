@@ -11,6 +11,7 @@ import FAQ from './pages/FAQ';
 import AboutUs from './pages/AboutUs';
 import Contact from './pages/Contact';
 import PrivacyPolicy from './pages/PrivacyPolicy';
+import AdminDashboard from './pages/AdminDashboard';
 import { AccessibilityProvider } from './contexts/AccessibilityContext';
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
               <Route path="/about" element={<AboutUs />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
           </main>
           <Footer />

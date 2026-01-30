@@ -13,6 +13,14 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// Max Logging: Wrap query to log execution
+const originalQuery = pool.query.bind(pool);
+pool.query = async (...args) => {
+    console.log('🗄️ Executing SQL:', args[0]);
+    if (args[1]) console.log('🗄️ SQL Parameters:', args[1]);
+    return originalQuery(...args);
+};
+
 const initDB = async () => {
     try {
         const connection = await pool.getConnection();

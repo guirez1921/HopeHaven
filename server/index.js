@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const morgan = require('morgan');
 const { initDB } = require('./lib/db');
 const apiRoutes = require('./routes/api');
 
@@ -13,6 +14,15 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Max Logging: Log full request body for POST/PUT
+app.use(morgan('dev'));
+app.use((req, res, next) => {
+  if (['POST', 'PUT'].includes(req.method)) {
+    console.log(`🔍 [${req.method}] ${req.url} Request Body:`, JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
 
 // Initialize Database
 initDB();
