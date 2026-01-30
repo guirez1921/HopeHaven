@@ -64,7 +64,7 @@ const AdminDashboard: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [expandedId, setExpandedId] = useState<number | null>(null);
 
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://hopehaven-backend.vercel.app';
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
 
     const handleLogin = (e: React.FormEvent) => {
         e.preventDefault();
