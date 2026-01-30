@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toaster } from 'sonner';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
@@ -17,6 +18,7 @@ function App() {
     <AccessibilityProvider>
       <Router>
         <div className="min-h-screen bg-gray-50 flex flex-col">
+          <Toaster position="top-right" richColors />
           <Header />
           <main className="flex-grow">
             <Routes>

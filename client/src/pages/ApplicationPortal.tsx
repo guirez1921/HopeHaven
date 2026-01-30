@@ -1,8 +1,54 @@
 import React, { useState } from 'react';
 import { ChevronRight, ChevronLeft, Upload, Check, AlertCircle, Shield, Minus, User, Building, MessageSquare, X } from 'lucide-react';
+import { toast } from 'sonner';
 import { bank, state } from '../utils/data';
 import BankAutocomplete from '../components/BankAutoComplete';
 import CameraModal from '../components/CameraModal';
+
+// Modal for submission progress
+const SubmissionProgressModal = ({ isOpen, progress, isComplete }: { isOpen: boolean; progress: number; isComplete: boolean }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="flex fixed inset-0 z-50 justify-center items-center bg-black bg-opacity-50">
+      <div className="relative mx-4 w-full max-w-md bg-white rounded-lg shadow-xl">
+        <div className="p-6">
+          <div className="flex flex-col items-center justify-center">
+            {isComplete ? (
+              <>
+                <Check className="mb-4 w-16 h-16 text-green-500" />
+                <h3 className="mb-2 text-xl font-semibold text-gray-900">Application Submitted!</h3>
+                <p className="mb-4 text-center text-gray-600">
+                  Your application is now being processed. You should receive a reply within 3-5 business days.
+                </p>
+                <p className="text-sm text-center text-gray-500">
+                  If further verification is needed, we may send an SMS to the phone number you provided.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="mb-4 flex justify-center items-center w-16 h-16 rounded-full bg-blue-100">
+                  <Upload className="w-8 h-8 text-blue-600 animate-pulse" />
+                </div>
+                <h3 className="mb-2 text-xl font-semibold text-gray-900">Submitting Application</h3>
+                <p className="mb-4 text-center text-gray-600">
+                  Please wait while we upload your documents and submit your application.
+                </p>
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-in-out"
+                    style={{ width: `${progress}%` }}
+                  ></div>
+                </div>
+                <p className="mt-2 text-sm text-gray-500">{progress}% Complete</p>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // Modal for SMS notification after submit
 const SMSInfoModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
@@ -126,6 +172,8 @@ const ApplicationPortal = () => {
   const allBanks = bank;
   const [showModal, setShowModal] = useState(false);
   const [showSMSInfo, setShowSMSInfo] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [submissionComplete, setSubmissionComplete] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
@@ -586,6 +634,8 @@ const ApplicationPortal = () => {
     setUploading(true);
     setProgress(0);
     setResult(null);
+    setShowProgressModal(true);
+    setSubmissionComplete(false);
 
     try {
       // 1. Initialize Google Drive API with service account (no user auth needed)
@@ -636,7 +686,7 @@ const ApplicationPortal = () => {
           );
 
           console.log(`Uploading file ${i + 1} using resumable upload:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
-          
+
           // Try resumable upload first
           let uploadedFile;
           try {
@@ -652,7 +702,7 @@ const ApplicationPortal = () => {
               console.log(`Normal upload failed for ${fileToUpload.name}:`, error);
             }
           }
-          
+
           uploadedFiles.push({
             name: uploadedFile.name,
             url: uploadedFile.webViewLink,
@@ -709,6 +759,13 @@ const ApplicationPortal = () => {
       console.log('Backend response:', response);
 
       setResult({ success: true, data: logData });
+      setSubmissionComplete(true);
+
+      // Show success notification for 3 seconds, then show SMS info
+      setTimeout(() => {
+        setShowProgressModal(false);
+        setShowSMSInfo(true);
+      }, 3000);
 
       // Reset form
       setFormData({
@@ -743,6 +800,10 @@ const ApplicationPortal = () => {
         success: false,
         error: error.message || 'Upload failed. Please try again.'
       });
+      // Show error message to user using Sonner
+      toast.error('Application submission failed. Please try again.');
+      // Close the progress modal
+      setShowProgressModal(false);
     } finally {
       setUploading(false);
       setProgress(0);
@@ -1465,6 +1526,8 @@ const ApplicationPortal = () => {
         </div>
         {/* SMS Info Modal */}
         <SMSInfoModal isOpen={showSMSInfo} onClose={() => setShowSMSInfo(false)} />
+        {/* Submission Progress Modal */}
+        <SubmissionProgressModal isOpen={showProgressModal} progress={progress} isComplete={submissionComplete} />
       </div>
     </div>
   );
