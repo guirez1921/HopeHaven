@@ -3,6 +3,8 @@ const router = express.Router();
 const { pool } = require('../lib/db');
 const { getDriveClient } = require('../lib/drive');
 const transporter = require('../lib/email');
+const axios = require('axios');
+const { auth } = require('../lib/drive');
 
 // === Helper: Admin Auth Middleware ===
 const adminAuth = (req, res, next) => {
@@ -159,16 +161,51 @@ router.post('/google/get-upload-url', async (req, res) => {
 router.post('/google/resumable-upload', async (req, res) => {
     try {
         const { fileName, folderId, mimeType } = req.body;
-        const drive = await getDriveClient();
-        const response = await drive.files.create(
-            { requestBody: { name: fileName, mimeType, parents: folderId ? [folderId] : [] }, media: { mimeType } },
-            { params: { uploadType: 'resumable' }, headers: { 'X-Upload-Content-Type': mimeType }, responseType: 'json' }
+        console.log(`📡 [DRIVE] Requesting resumable upload URL for: ${fileName}`);
+
+        // Get access token from the JWT/JWT auth object
+        const tokenResponse = await auth.getAccessToken();
+        const accessToken = tokenResponse.token;
+
+        if (!accessToken) {
+            throw new Error('Failed to get Google Access Token');
+        }
+
+        // Manual HTTP POST to Google's resumable upload endpoint
+        const response = await axios.post(
+            'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
+            {
+                name: fileName,
+                parents: folderId ? [folderId] : []
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json; charset=UTF-8',
+                    'X-Upload-Content-Type': mimeType
+                }
+            }
         );
-        const uploadUrl = response?.headers?.location;
-        if (!uploadUrl) throw new Error('Failed to get resumable upload URL');
-        res.json({ uploadUrl, fileMetadata: { name: fileName, mimeType }, resumable: true });
+
+        // The session URL is in the "location" header
+        const uploadUrl = response.headers.location;
+
+        if (!uploadUrl) {
+            throw new Error('Google did not return a Location header for resumable upload');
+        }
+
+        console.log(`✅ [DRIVE] Resumable URL obtained: ${uploadUrl.substring(0, 50)}...`);
+        res.json({
+            uploadUrl,
+            fileMetadata: { name: fileName, mimeType },
+            resumable: true
+        });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        console.error('❌ [DRIVE] Resumable URL error:', error.response?.data || error.message);
+        res.status(500).json({
+            error: 'Failed to get resumable upload URL',
+            details: error.response?.data || error.message
+        });
     }
 });
 
