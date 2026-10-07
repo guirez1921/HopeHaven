@@ -1,10 +1,10 @@
 const mysql = require('mysql2/promise');
 
 const dbConfig = {
-    host: process.env.DB_HOST || 'sql7.freesqldatabase.com',
-    user: process.env.DB_USER || 'sql7815776',
-    password: process.env.DB_PASSWORD || 'Hz6LQxmi4P',
-    database: process.env.DB_NAME || 'sql7815776',
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
     port: process.env.DB_PORT || 3306,
     waitForConnections: true,
     connectionLimit: 10,
@@ -84,10 +84,10 @@ const initDB = async () => {
         `);
 
         // Check if default admin exists; seed if missing
-        const defaultUser = process.env.ADMIN_USER || 'admin';
-        const defaultPass = process.env.ADMIN_PASS || 'password123';
+        const defaultUser = process.env.ADMIN_USER;
+        const defaultPass = process.env.ADMIN_PASS;
         const [existingUsers] = await connection.query('SELECT * FROM admin_users WHERE is_default = 1 OR username = ?', [defaultUser]);
-        if (existingUsers.length === 0) {
+        if (existingUsers.length === 0 && defaultUser && defaultPass) {
             await connection.query(
                 'INSERT INTO admin_users (username, password, is_default) VALUES (?, ?, 1)',
                 [defaultUser, defaultPass]

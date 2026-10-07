@@ -119,7 +119,7 @@ const AdminDashboard: React.FC = () => {
     // Copy Feedback
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
+    const backendUrl = import.meta.env.VITE_BACKEND_URL;
 
     const handleLogout = useCallback(() => {
         sessionStorage.removeItem('adminAuth');
@@ -313,10 +313,13 @@ const AdminDashboard: React.FC = () => {
         setTimeout(() => setCopiedField(null), 2000);
     };
 
-    // Helper: Build streaming & download URLs
+    // Helper: Build streaming & download URLs (Direct Cloudinary URLs)
     const getDriveMediaUrl = (file: FileLink, type: 'view' | 'download') => {
-        const fileId = file.drive_id || file.url.split('/d/')[1]?.split('/')[0] || file.url.split('id=')[1] || '';
-        return `${backendUrl}/api/admin/drive/${type}/${fileId}?auth=${encodeURIComponent(authToken)}`;
+        if (!file?.url) return '';
+        if (type === 'download' && file.url.includes('cloudinary.com')) {
+            return file.url.replace('/upload/', '/upload/fl_attachment/');
+        }
+        return file.url;
     };
 
     const isVideoFile = (file: FileLink) => {
@@ -628,7 +631,7 @@ const AdminDashboard: React.FC = () => {
                                                     <div className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-sm">
                                                         <div className="flex items-center justify-between mb-3">
                                                             <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
-                                                                <FileText className="w-3.5 h-3.5 text-indigo-600" /> Drive Files ({app.files?.length || 0})
+                                                                <FileText className="w-3.5 h-3.5 text-indigo-600" /> Uploaded Files ({app.files?.length || 0})
                                                             </h4>
                                                             {app.drive_folder_url && (
                                                                 <a
@@ -678,6 +681,8 @@ const AdminDashboard: React.FC = () => {
                                                                                 <a
                                                                                     href={getDriveMediaUrl(file, 'download')}
                                                                                     download
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
                                                                                     className="p-1 text-gray-500 hover:text-gray-800 hover:bg-white rounded transition-colors"
                                                                                     title="Download"
                                                                                 >
@@ -1001,7 +1006,7 @@ const AdminDashboard: React.FC = () => {
                             {/* Files & Documents with Player and Downloader */}
                             <div className="bg-slate-50 p-5 rounded-2xl border border-gray-200/80">
                                 <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                                    <FileText className="w-4 h-4 text-indigo-600" /> Attached Google Drive Media & Documents ({selectedApplication.files?.length || 0})
+                                    <FileText className="w-4 h-4 text-indigo-600" /> Attached Media & Documents ({selectedApplication.files?.length || 0})
                                 </h4>
                                 {selectedApplication.files && selectedApplication.files.length > 0 ? (
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1042,8 +1047,10 @@ const AdminDashboard: React.FC = () => {
                                                         <a
                                                             href={getDriveMediaUrl(file, 'download')}
                                                             download
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
                                                             className="p-2 bg-slate-100 hover:bg-slate-200 text-gray-700 rounded-lg transition-colors"
-                                                            title="Download File from Drive"
+                                                            title="Download File"
                                                         >
                                                             <Download className="w-4 h-4" />
                                                         </a>
@@ -1093,6 +1100,8 @@ const AdminDashboard: React.FC = () => {
                                 <a
                                     href={getDriveMediaUrl(videoModal.file, 'download')}
                                     download
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors"
                                 >
                                     <Download className="w-3.5 h-3.5" /> Download
@@ -1133,6 +1142,8 @@ const AdminDashboard: React.FC = () => {
                                 <a
                                     href={getDriveMediaUrl(imageModal.file, 'download')}
                                     download
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors"
                                 >
                                     <Download className="w-3.5 h-3.5" /> Download

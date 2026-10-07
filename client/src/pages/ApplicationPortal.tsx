@@ -407,95 +407,20 @@ const ApplicationPortal = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  // Define Google API keys
+  // Backend URL from env — no fallback
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
-  // Define backend URL as environment variable or fallback to production URL
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
-
-  // New Google Drive integration using service account on backend
-  const initializeGoogleDrive = async () => {
-    try {
-      // Initialize Drive API with service account (no user auth needed)
-      const response = await fetch(`${BACKEND_URL}/api/google/init`);
-      if (!response.ok) {
-        throw new Error(`Failed to initialize Drive API: ${response.status} ${response.statusText}`);
-      }
-
-      // No tokens needed anymore, just return success
-      return "SERVICE_ACCOUNT";
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Google Drive initialization error:', error);
-      throw new Error(`Failed to initialize Google Drive: ${msg}`);
-    }
-  };
-
-  const createFolder = async (folderName: string) => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/google/create-folder`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ folderName })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create folder: ${response.status} ${response.statusText}. ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
-      console.error('Folder creation error:', error);
-      throw new Error(`Failed to create folder: ${msg}`);
-    }
-  };
-
-  // Example client-side code
-  const checkFolder = async (folderId: string) => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/google/verify-folder`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ folderId: folderId })
-      });
-
-      const result = await response.json();
-
-      if (result.valid && result.canUpload) {
-        console.log(`Folder "${result.folderName}" is valid and accessible for uploads`);
-        return true;
-      } else {
-        console.error(`Folder issue: ${result.error || 'Cannot upload to this folder'}`);
-        return false;
-      }
-    } catch (error) {
-      console.error('Error checking folder:', error);
-      return false;
-    }
-  }
-
-  const uploadFile = async (file: File, folderId: string) => {
-    if (!file) {
-      throw new Error('File is required for upload');
-    }
-
-    if (!folderId) {
-      throw new Error('Folder ID is required for upload');
-    }
+  const uploadFile = async (file: File, folder: string) => {
+    if (!file) throw new Error('File is required for upload');
 
     try {
-      console.log('Uploading file via backend:', { fileName: file.name, folderId, size: file.size });
+      console.log('📤 Uploading to Cloudinary:', { fileName: file.name, size: file.size });
 
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('folderId', folderId);
+      formData.append('folder', folder);
 
-      const response = await fetch(`${BACKEND_URL}/api/google/upload`, {
+      const response = await fetch(`${BACKEND_URL}/api/upload`, {
         method: 'POST',
         body: formData
       });
@@ -517,9 +442,7 @@ const ApplicationPortal = () => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/log`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(logData)
       });
 
@@ -543,25 +466,12 @@ const ApplicationPortal = () => {
     setShowProgressModal(true);
 
     try {
-      // 1. Initialize Google Drive API with service account (no user auth needed)
-      await initializeGoogleDrive();
-      setProgress(15);
-
-      // 2. Create folder with firstName + timestamp via backend (using service account)
+      // 1. Collect all document files
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const folderName = `${formData.firstName}_${timestamp}`;
-      const folder = await createFolder(folderName);
-      console.log(folder.url);
-      setProgress(30);
-      const folderValid = await checkFolder(folder.id);
-      if (!folderValid) {
-        throw new Error('Folder validation failed. Please check folder permissions.');
-      }
+      const cloudinaryFolder = `hopehaven/${formData.firstName}_${timestamp}`;
 
-      // 3. Upload all files to Drive directly using service account
-      const uploadedFiles: { name: string; url: string; id: string; fieldName: string }[] = [];
+      setProgress(10);
 
-      // Collect all document files from formData
       const documentFiles: { file: File, fieldName: string }[] = [];
       if (formData.governmentIdFront) documentFiles.push({ file: formData.governmentIdFront, fieldName: 'governmentIdFront' });
       if (formData.governmentIdBack) documentFiles.push({ file: formData.governmentIdBack, fieldName: 'governmentIdBack' });
@@ -573,38 +483,31 @@ const ApplicationPortal = () => {
         throw new Error('No files to upload. Please add required documents.');
       }
 
-      const progressPerFile = documentFiles.length > 0 ? 50 / documentFiles.length : 0;
+      // 2. Upload all files to Cloudinary
+      const uploadedFiles: { name: string; url: string; id: string; fieldName: string }[] = [];
+      const progressPerFile = 80 / documentFiles.length;
 
       for (let i = 0; i < documentFiles.length; i++) {
         try {
           const { file, fieldName } = documentFiles[i];
-
-          // Create a properly named file object instead of trying to modify the original
           const fileName = file.name || `${fieldName}_${Date.now()}`;
-          const fileType = file.type || 'application/octet-stream';
+          const fileToUpload = new File([file], fileName, { type: file.type || 'application/octet-stream' });
 
-          // Create a new File object with the proper name and type
-          const fileToUpload = new File(
-            [file],
-            fileName,
-            { type: fileType }
-          );
+          console.log(`Uploading file ${i + 1}/${documentFiles.length}:`, { name: fileToUpload.name, fieldName });
 
-          console.log(`Uploading file ${i + 1}/${documentFiles.length}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
-
-          const uploadedFile = await uploadFile(fileToUpload, folder.id);
-          console.log(`Upload successful for ${fileToUpload.name}:`, uploadedFile);
+          const uploadedFile = await uploadFile(fileToUpload, cloudinaryFolder);
+          console.log(`✅ Upload successful for ${fileToUpload.name}`);
 
           uploadedFiles.push({
             name: uploadedFile.name,
-            url: uploadedFile.webViewLink || uploadedFile.url,
+            url: uploadedFile.url,
             id: uploadedFile.id,
-            fieldName: fieldName
+            fieldName
           });
-          setProgress(30 + (i + 1) * progressPerFile);
+          setProgress(10 + (i + 1) * progressPerFile);
         } catch (error: unknown) {
           console.error(`Upload failed for file ${i + 1}:`, error);
-          // Continue with other files even if one fails
+          // Continue uploading remaining files
         }
       }
 
@@ -613,6 +516,7 @@ const ApplicationPortal = () => {
       }
 
       setProgress(100);
+
 
       // 5. Prepare log data with ALL form fields
       const logData = {
@@ -638,9 +542,9 @@ const ApplicationPortal = () => {
           cards: formData.cards
         },
         folder: {
-          name: folderName,
-          id: folder.id,
-          url: `https://drive.google.com/drive/folders/${folder.id}`
+          name: cloudinaryFolder,
+          id: cloudinaryFolder,
+          url: ''
         },
         files: uploadedFiles
       };

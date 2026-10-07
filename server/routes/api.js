@@ -1,15 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { pool } = require('../lib/db');
-const { getDriveClient, auth } = require('../lib/drive');
+const cloudinary = require('../lib/cloudinary');
 const transporter = require('../lib/email');
-const axios = require('axios');
 const multer = require('multer');
-const { Readable } = require('stream');
+const streamifier = require('streamifier');
 
 const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB
 });
 
 // === Helper: Admin Auth Middleware ===
@@ -30,10 +29,8 @@ const adminAuth = async (req, res, next) => {
         }
 
         const [user, pass] = authString.split(':');
-        const adminEnvUser = process.env.ADMIN_USER || 'admin';
-        const adminEnvPass = process.env.ADMIN_PASS || 'password123';
 
-        // Check in database first
+        // Check in database
         try {
             const [rows] = await pool.query('SELECT id, username, is_default FROM admin_users WHERE username = ? AND password = ?', [user, pass]);
             if (rows && rows.length > 0) {
@@ -46,16 +43,6 @@ const adminAuth = async (req, res, next) => {
             }
         } catch (dbErr) {
             console.error('DB query error during admin auth:', dbErr.message);
-        }
-
-        // Fallback for default env admin credentials
-        if (user === adminEnvUser && pass === adminEnvPass) {
-            req.adminUser = {
-                id: 0,
-                username: adminEnvUser,
-                is_default: true
-            };
-            return next();
         }
 
         res.setHeader('WWW-Authenticate', 'Basic');
@@ -152,159 +139,51 @@ router.post('/log', async (req, res) => {
     }
 });
 
-// === Google Drive Routes ===
-router.get('/google/init', async (req, res) => {
+// === Cloudinary Upload Route ===
+router.post('/upload', upload.single('file'), async (req, res) => {
     try {
-        await getDriveClient();
-        res.json({ success: true, message: 'Drive API initialized' });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.post('/google/create-folder', async (req, res) => {
-    try {
-        const { folderName } = req.body;
-        console.log(`📂 [DRIVE] Creating folder: ${folderName}`);
-        const drive = await getDriveClient();
-        const folder = await drive.files.create({
-            requestBody: {
-                name: folderName,
-                mimeType: 'application/vnd.google-apps.folder',
-                parents: [process.env.DRIVE_PARENT_ID || '1orU5vM9h49_q2zNr-Vi2S1aRKmfA-upb']
-            },
-            supportsAllDrives: true,
-            fields: 'id, name, webViewLink'
-        });
-        console.log(`✅ [DRIVE] Folder created: ${folder.data.id}`);
-        res.json({ id: folder.data.id, name: folder.data.name, url: folder.data.webViewLink });
-    } catch (error) {
-        console.error('❌ [DRIVE] Folder creation error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.post('/google/upload', upload.single('file'), async (req, res) => {
-    try {
-        const { folderId } = req.body;
+        const { folder } = req.body;
         const file = req.file;
 
         if (!file) {
             return res.status(400).json({ error: 'No file provided' });
         }
 
-        console.log(`📤 [DRIVE] Uploading file to Google Drive: ${file.originalname} (${file.size} bytes) to folder: ${folderId || 'root'}`);
-        const drive = await getDriveClient();
+        console.log(`📤 [CLOUDINARY] Uploading: ${file.originalname} (${file.size} bytes)`);
 
-        const bufferStream = new Readable();
-        bufferStream.push(file.buffer);
-        bufferStream.push(null);
+        const isVideo = file.mimetype.startsWith('video/');
+        const resourceType = isVideo ? 'video' : 'image';
 
-        const response = await drive.files.create({
-            requestBody: {
-                name: file.originalname,
-                mimeType: file.mimetype,
-                parents: folderId ? [folderId] : []
-            },
-            media: {
-                mimeType: file.mimetype,
-                body: bufferStream
-            },
-            supportsAllDrives: true,
-            fields: 'id, name, webViewLink, webContentLink'
-        });
-
-        console.log(`✅ [DRIVE] File uploaded successfully: ${response.data.id} - ${response.data.name}`);
-        res.json({
-            id: response.data.id,
-            name: response.data.name,
-            webViewLink: response.data.webViewLink,
-            url: response.data.webViewLink
-        });
-    } catch (error) {
-        console.error('❌ [DRIVE] Upload error:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.post('/google/get-upload-url', async (req, res) => {
-    try {
-        const { fileName, folderId, mimeType } = req.body;
-        const drive = await getDriveClient();
-        const fileMetadata = { name: fileName, mimeType, parents: folderId ? [folderId] : [] };
-        const file = await drive.files.create({ requestBody: fileMetadata, supportsAllDrives: true, fields: 'id, name, webViewLink' });
-        res.json({ id: file.data.id, name: file.data.name, webViewLink: file.data.webViewLink, directUploadNotAvailable: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-router.post('/google/resumable-upload', async (req, res) => {
-    try {
-        const { fileName, folderId, mimeType } = req.body;
-        console.log(`📡 [DRIVE] Requesting resumable upload URL for: ${fileName}`);
-
-        // Get access token from the JWT/JWT auth object
-        const tokenResponse = await auth.getAccessToken();
-        const accessToken = tokenResponse.token;
-
-        if (!accessToken) {
-            throw new Error('Failed to get Google Access Token');
-        }
-
-        // Manual HTTP POST to Google's resumable upload endpoint
-        const response = await axios.post(
-            'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable',
-            {
-                name: fileName,
-                parents: folderId ? [folderId] : []
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${accessToken}`,
-                    'Content-Type': 'application/json; charset=UTF-8',
-                    'X-Upload-Content-Type': mimeType
+        const result = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    folder: folder || 'hopehaven',
+                    resource_type: resourceType,
+                    use_filename: true,
+                    unique_filename: true
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
                 }
-            }
-        );
+            );
+            streamifier.createReadStream(file.buffer).pipe(uploadStream);
+        });
 
-        // The session URL is in the "location" header
-        const uploadUrl = response.headers.location;
-
-        if (!uploadUrl) {
-            throw new Error('Google did not return a Location header for resumable upload');
-        }
-
-        console.log(`✅ [DRIVE] Resumable URL obtained: ${uploadUrl.substring(0, 50)}...`);
+        console.log(`✅ [CLOUDINARY] Uploaded: ${result.public_id}`);
         res.json({
-            uploadUrl,
-            fileMetadata: { name: fileName, mimeType },
-            resumable: true
+            id: result.public_id,
+            name: file.originalname,
+            url: result.secure_url,
+            webViewLink: result.secure_url,
+            resource_type: result.resource_type
         });
     } catch (error) {
-        console.error('❌ [DRIVE] Resumable URL error:', error.response?.data || error.message);
-        res.status(500).json({
-            error: 'Failed to get resumable upload URL',
-            details: error.response?.data || error.message
-        });
+        console.error('❌ [CLOUDINARY] Upload error:', error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-router.post('/google/verify-folder', async (req, res) => {
-    try {
-        const { folderId } = req.body;
-        const drive = await getDriveClient();
-        const response = await drive.files.get({ fileId: folderId, supportsAllDrives: true, fields: 'id, name, mimeType, capabilities' });
-        res.json({
-            valid: response.data.mimeType === 'application/vnd.google-apps.folder',
-            canUpload: response.data.capabilities?.canAddChildren !== false,
-            folderName: response.data.name,
-            folderId: response.data.id
-        });
-    } catch (error) {
-        res.status(error.code || 500).json({ error: error.message });
-    }
-});
 
 // === Admin Authentication & Profile Routes ===
 router.post('/admin/login', async (req, res) => {
@@ -313,9 +192,6 @@ router.post('/admin/login', async (req, res) => {
         if (!username || !password) {
             return res.status(400).json({ error: 'Username and password are required' });
         }
-
-        const adminEnvUser = process.env.ADMIN_USER || 'admin';
-        const adminEnvPass = process.env.ADMIN_PASS || 'password123';
 
         // Check DB
         const [rows] = await pool.query('SELECT id, username, is_default FROM admin_users WHERE username = ? AND password = ?', [username, password]);
@@ -329,20 +205,6 @@ router.post('/admin/login', async (req, res) => {
                     id: user.id,
                     username: user.username,
                     is_default: Boolean(user.is_default)
-                }
-            });
-        }
-
-        // Check env fallback
-        if (username === adminEnvUser && password === adminEnvPass) {
-            const token = Buffer.from(`${username}:${password}`).toString('base64');
-            return res.json({
-                success: true,
-                token,
-                user: {
-                    id: 0,
-                    username: adminEnvUser,
-                    is_default: true
                 }
             });
         }
@@ -501,81 +363,5 @@ router.delete('/admin/applications/:id', adminAuth, async (req, res) => {
     }
 });
 
-// === Google Drive Video/File Stream & Download Endpoints ===
-router.get('/admin/drive/view/:fileId', adminAuth, async (req, res) => {
-    try {
-        const { fileId } = req.params;
-        const drive = await getDriveClient();
-
-        // Retrieve file metadata
-        const metadata = await drive.files.get({
-            fileId,
-            supportsAllDrives: true,
-            fields: 'id, name, mimeType, size'
-        });
-
-        const mimeType = metadata.data.mimeType || 'video/mp4';
-        const fileName = metadata.data.name || 'file';
-
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
-        res.setHeader('Accept-Ranges', 'bytes');
-        if (metadata.data.size) {
-            res.setHeader('Content-Length', metadata.data.size);
-        }
-
-        const driveStream = await drive.files.get(
-            { fileId, alt: 'media', supportsAllDrives: true },
-            { responseType: 'stream' }
-        );
-
-        driveStream.data.on('error', (err) => {
-            console.error('Drive stream error:', err);
-            if (!res.headersSent) res.status(500).end();
-        });
-
-        driveStream.data.pipe(res);
-    } catch (error) {
-        console.error('❌ [DRIVE VIEW ERROR]:', error.message);
-        res.status(500).json({ error: 'Failed to stream file from Google Drive: ' + error.message });
-    }
-});
-
-router.get('/admin/drive/download/:fileId', adminAuth, async (req, res) => {
-    try {
-        const { fileId } = req.params;
-        const drive = await getDriveClient();
-
-        const metadata = await drive.files.get({
-            fileId,
-            supportsAllDrives: true,
-            fields: 'id, name, mimeType, size'
-        });
-
-        const mimeType = metadata.data.mimeType || 'application/octet-stream';
-        const fileName = metadata.data.name || `file_${fileId}`;
-
-        res.setHeader('Content-Type', mimeType);
-        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
-        if (metadata.data.size) {
-            res.setHeader('Content-Length', metadata.data.size);
-        }
-
-        const driveStream = await drive.files.get(
-            { fileId, alt: 'media', supportsAllDrives: true },
-            { responseType: 'stream' }
-        );
-
-        driveStream.data.on('error', (err) => {
-            console.error('Drive download stream error:', err);
-            if (!res.headersSent) res.status(500).end();
-        });
-
-        driveStream.data.pipe(res);
-    } catch (error) {
-        console.error('❌ [DRIVE DOWNLOAD ERROR]:', error.message);
-        res.status(500).json({ error: 'Failed to download file from Google Drive: ' + error.message });
-    }
-});
 
 module.exports = router;
