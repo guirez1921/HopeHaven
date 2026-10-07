@@ -60,7 +60,7 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
             setSmsSent(true);
             setTimeLeft(300);
             setCanResend(false);
-        } catch (err) {
+        } catch {
             setError('Failed to send verification code. Please try again.');
         } finally {
             setIsLoading(false);
@@ -118,7 +118,7 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
             } else {
                 throw new Error('Invalid code');
             }
-        } catch (err) {
+        } catch {
             setError('Invalid verification code. Please try again.');
             setVerificationCode(['', '', '', '', '', '']);
             inputRefs.current[0]?.focus();
@@ -228,14 +228,14 @@ const VerificationModal: React.FC<VerificationModalProps> = ({
 
                             {/* Timer and Resend */}
                             <div className="text-center">
-                                {timeLeft > 0 ? (
+                                {!canResend && timeLeft > 0 ? (
                                     <p className="text-sm text-gray-500">
                                         Didn't receive the code? Resend in {formatTime(timeLeft)}
                                     </p>
                                 ) : (
                                     <button
                                         onClick={handleResend}
-                                        disabled={isLoading}
+                                        disabled={isLoading || !canResend}
                                         className="text-sm font-medium text-blue-600 hover:text-blue-800 disabled:text-gray-400"
                                     >
                                         Resend verification code

@@ -6,7 +6,7 @@ import { useAccessibility } from '../contexts/AccessibilityContext';
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const location = useLocation();
-  const { highContrast, toggleHighContrast, fontSize, increaseFontSize, decreaseFontSize } = useAccessibility();
+  const { highContrast, toggleHighContrast, increaseFontSize, decreaseFontSize } = useAccessibility();
 
   const navigation = [
     { name: 'Home', href: '/' },

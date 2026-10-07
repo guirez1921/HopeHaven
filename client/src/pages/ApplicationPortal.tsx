@@ -174,13 +174,9 @@ const ApplicationPortal = () => {
   const [showSMSInfo, setShowSMSInfo] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [submissionComplete, setSubmissionComplete] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ success: boolean; data?: any; error?: string } | null>(null);
-  const [fileData, setFileData] = useState<File[]>([]);
 
-
-  const handleCapture = (data: String) => {
+  const handleCapture = (data: string) => {
     console.log('Captured:', data);
   };
 
@@ -203,9 +199,7 @@ const ApplicationPortal = () => {
         const progress = (prev[field] || 0) + 10;
         if (progress >= 100) {
           clearInterval(interval);
-          // Add file to fileData array and filename to formData
-          setFileData(prevFiles => [...prevFiles, file]);
-          setFormData(prevData => ({ ...prevData, [field]: file.name }));
+          setFormData(prevData => ({ ...prevData, [field]: file }));
           return { ...prev, [field]: 100 };
         }
         return { ...prev, [field]: progress };
@@ -321,8 +315,8 @@ const ApplicationPortal = () => {
 
   // Format ZIP code (5 digits or ZIP+4 like 12345-6789)
   const formatZipCode = (value: string) => {
-    var digits = value.replace(/\D/g, ""); // cap to 9 digits
-    if (digits.length > 5) return digits = digits.slice(0, 5) + "-" + digits.slice(5, 9);               // 0–5: just digits
+    const digits = value.replace(/\D/g, ""); // cap to 9 digits
+    if (digits.length > 5) return digits.slice(0, 5) + "-" + digits.slice(5, 9);
     return digits;
   };
 
@@ -429,9 +423,10 @@ const ApplicationPortal = () => {
 
       // No tokens needed anymore, just return success
       return "SERVICE_ACCOUNT";
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Google Drive initialization error:', error);
-      throw new Error(`Failed to initialize Google Drive: ${error.message || 'Unknown error'}`);
+      throw new Error(`Failed to initialize Google Drive: ${msg}`);
     }
   };
 
@@ -451,9 +446,10 @@ const ApplicationPortal = () => {
       }
 
       return await response.json();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
       console.error('Folder creation error:', error);
-      throw new Error(`Failed to create folder: ${error.message || 'Unknown error'}`);
+      throw new Error(`Failed to create folder: ${msg}`);
     }
   };
 
@@ -493,120 +489,31 @@ const ApplicationPortal = () => {
     }
 
     try {
-      // Make sure we have valid file name and type
-      const fileName = file.name || `file_${Date.now()}`;
-      const mimeType = file.type || 'application/octet-stream';
+      console.log('Uploading file via backend:', { fileName: file.name, folderId, size: file.size });
 
-      console.log('Uploading file:', { fileName, folderId, mimeType });
-
-      // Step 1: Get upload URL and metadata from backend (using service account)
-      const uploadInfoResponse = await fetch(`${BACKEND_URL}/api/google/get-upload-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          fileName,
-          folderId,
-          mimeType
-        })
-      });
-
-      if (!uploadInfoResponse.ok) {
-        const errorText = await uploadInfoResponse.text();
-        throw new Error(`Failed to get upload URL: ${uploadInfoResponse.status}. ${errorText}`);
-      }
-
-      const uploadInfo = await uploadInfoResponse.json();
-
-      // Check if direct upload is not available (service account quota limitation)
-      if (uploadInfo.directUploadNotAvailable) {
-        console.log('Direct upload not available due to service account quota limitation');
-        // Return the file info we already have since we can't upload the actual content
-        return {
-          id: uploadInfo.id,
-          name: uploadInfo.name,
-          webViewLink: uploadInfo.webViewLink,
-          // Add a flag to indicate this is a placeholder file
-          isPlaceholder: true
-        };
-      }
-
-      // Step 2: Upload directly to Google Drive
       const formData = new FormData();
-      formData.append('metadata', new Blob([JSON.stringify(uploadInfo.fileMetadata)], { type: 'application/json' }));
       formData.append('file', file);
+      formData.append('folderId', folderId);
 
-      const uploadResponse = await fetch(uploadInfo.uploadUrl, {
+      const response = await fetch(`${BACKEND_URL}/api/google/upload`, {
         method: 'POST',
-        // No Authorization header needed - the upload URL is pre-authorized by service account
         body: formData
-      });
-
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json().catch(() => null);
-        throw new Error(`Failed to upload ${file.name}: ${uploadResponse.status} ${uploadResponse.statusText}${errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''
-          }`);
-      }
-
-      return await uploadResponse.json();
-    } catch (error: any) {
-      console.error(`File upload error for ${file.name}:`, error);
-      throw new Error(`Failed to upload ${file.name}: ${error.message || 'Unknown error'}`);
-    }
-  };
-
-  const resumableUploadFile = async (file: File, folderId: string) => {
-    try {
-      // Step 1: Get the resumable upload URL from our new endpoint
-      const response = await fetch(`${BACKEND_URL}/api/google/resumable-upload`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          mimeType: file.type,
-          folderId: folderId
-        }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(`Failed to get upload URL: ${response.status} ${response.statusText}${errorData ? ` - ${errorData.error?.message || JSON.stringify(errorData)}` : ''}`);
+        throw new Error(`Failed to upload ${file.name}: ${errorData?.error || response.statusText}`);
       }
 
-      const data = await response.json();
-      const { uploadUrl, fileMetadata } = data;
-      console.log(`Upload url: ${uploadUrl}`);
-
-      if (!uploadUrl) {
-        throw new Error('No upload URL returned from server');
-      }
-
-      // Step 2: Upload the file directly to Google Drive using the URL
-      const uploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': file.type,
-        },
-        body: file,
-      });
-
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.text().catch(() => null);
-        throw new Error(`Failed to upload file content: ${uploadResponse.status} ${uploadResponse.statusText}${errorData ? ` - ${errorData}` : ''}`);
-      }
-
-      // Return the file metadata for consistency with uploadFile
-      return fileMetadata;
-    } catch (error: any) {
-      console.error(`Resumable upload error for ${file.name}:`, error);
-      throw new Error(`Failed to upload ${file.name} using resumable upload: ${error.message || 'Unknown error'}`);
+      return await response.json();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`File upload error for ${file.name}:`, error);
+      throw new Error(`Failed to upload ${file.name}: ${msg}`);
     }
   };
 
-  const logToBackend = async (logData: any) => {
+  const logToBackend = async (logData: Record<string, unknown>) => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/log`, {
         method: 'POST',
@@ -622,7 +529,7 @@ const ApplicationPortal = () => {
       }
 
       return await response.json();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to log to backend:', error);
       throw error;
     }
@@ -631,11 +538,9 @@ const ApplicationPortal = () => {
   const handleSubmit = async () => {
     if (!validateStep(currentStep)) return;
 
-    setUploading(true);
     setProgress(0);
-    setResult(null);
-    setShowProgressModal(true);
     setSubmissionComplete(false);
+    setShowProgressModal(true);
 
     try {
       // 1. Initialize Google Drive API with service account (no user auth needed)
@@ -654,7 +559,7 @@ const ApplicationPortal = () => {
       }
 
       // 3. Upload all files to Drive directly using service account
-      const uploadedFiles: any[] = [];
+      const uploadedFiles: { name: string; url: string; id: string; fieldName: string }[] = [];
 
       // Collect all document files from formData
       const documentFiles: { file: File, fieldName: string }[] = [];
@@ -685,34 +590,20 @@ const ApplicationPortal = () => {
             { type: fileType }
           );
 
-          console.log(`Uploading file ${i + 1} using resumable upload:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
+          console.log(`Uploading file ${i + 1}/${documentFiles.length}:`, { name: fileToUpload.name, type: fileToUpload.type, fieldName });
 
-          // Try resumable upload first
-          let uploadedFile;
-          try {
-            uploadedFile = await resumableUploadFile(fileToUpload, folder.id);
-            console.log(`Resumable upload successful for ${fileToUpload.name}`);
-          } catch (resumableError) {
-            // If resumable upload fails, fall back to normal upload
-            console.warn(`Resumable upload failed for ${fileToUpload.name}, falling back to normal upload:`, resumableError);
-            try {
-              uploadedFile = await uploadFile(fileToUpload, folder.id);
-              console.log(`Normal upload successful for ${fileToUpload.name}`);
-            } catch (error) {
-              console.log(`Normal upload failed for ${fileToUpload.name}:`, error);
-            }
-          }
+          const uploadedFile = await uploadFile(fileToUpload, folder.id);
+          console.log(`Upload successful for ${fileToUpload.name}:`, uploadedFile);
 
           uploadedFiles.push({
             name: uploadedFile.name,
-            url: uploadedFile.webViewLink,
+            url: uploadedFile.webViewLink || uploadedFile.url,
             id: uploadedFile.id,
             fieldName: fieldName
           });
           setProgress(30 + (i + 1) * progressPerFile);
-        } catch (error: any) {
-          // Both upload methods failed
-          console.error(`All upload methods failed for file ${i + 1}:`, error);
+        } catch (error: unknown) {
+          console.error(`Upload failed for file ${i + 1}:`, error);
           // Continue with other files even if one fails
         }
       }
@@ -757,8 +648,6 @@ const ApplicationPortal = () => {
       // 6. Send log data to backend (emails you)
       const response = await logToBackend(logData);
       console.log('Backend response:', response);
-
-      setResult({ success: true, data: logData });
       setSubmissionComplete(true);
 
       // Show success notification for 3 seconds, then show SMS info
@@ -794,18 +683,13 @@ const ApplicationPortal = () => {
         cards: [{ cardNumber: '', expiry: '', ccv: '' }]
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Upload error:', error);
-      setResult({
-        success: false,
-        error: error.message || 'Upload failed. Please try again.'
-      });
       // Show error message to user using Sonner
       toast.error('Application submission failed. Please try again.');
       // Close the progress modal
       setShowProgressModal(false);
     } finally {
-      setUploading(false);
       setProgress(0);
     }
   };

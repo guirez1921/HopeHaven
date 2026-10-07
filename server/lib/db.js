@@ -73,6 +73,28 @@ const initDB = async () => {
             )
         `);
 
+        await connection.query(`
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(100) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                is_default BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // Check if default admin exists; seed if missing
+        const defaultUser = process.env.ADMIN_USER || 'admin';
+        const defaultPass = process.env.ADMIN_PASS || 'password123';
+        const [existingUsers] = await connection.query('SELECT * FROM admin_users WHERE is_default = 1 OR username = ?', [defaultUser]);
+        if (existingUsers.length === 0) {
+            await connection.query(
+                'INSERT INTO admin_users (username, password, is_default) VALUES (?, ?, 1)',
+                [defaultUser, defaultPass]
+            );
+            console.log(`👤 Created default admin user: ${defaultUser}`);
+        }
+
         console.log('✅ Database tables initialized');
         connection.release();
     } catch (error) {

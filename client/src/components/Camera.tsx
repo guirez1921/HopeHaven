@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { X, Camera, Video, RotateCcw, Check } from 'lucide-react';
 
 interface CameraModalProps {
@@ -24,42 +24,26 @@ const CameraModal: React.FC<CameraModalProps> = ({
     const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
     const [isRecording, setIsRecording] = useState(false);
-    const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
     const [countdown, setCountdown] = useState(10);
     const [preview, setPreview] = useState<string | null>(null);
     const [cameraStarted, setCameraStarted] = useState(false);
 
-    useEffect(() => {
-        if (isOpen) {
-            getDevices();
-        } else {
-            stopCamera();
-            setPreview(null);
-            setCountdown(10);
+    const stopCamera = useCallback(() => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
         }
+        setCameraStarted(false);
+    }, []);
 
-        return () => {
-            stopCamera();
-        };
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (selectedDeviceId && isOpen) {
-            startCamera();
+    const stopRecording = useCallback(() => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
         }
-    }, [selectedDeviceId, isOpen]);
+    }, [isRecording]);
 
-    useEffect(() => {
-        if (mode === 'video' && isRecording && countdown > 0) {
-            const timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
-            return () => clearTimeout(timer);
-        }
-        if (countdown === 0 && isRecording) {
-            stopRecording();
-        }
-    }, [countdown, isRecording, mode]);
-
-    const getDevices = async () => {
+    const getDevices = useCallback(async () => {
         try {
             const devices = await navigator.mediaDevices.enumerateDevices();
             const videoDevices = devices.filter(device => device.kind === 'videoinput');
@@ -78,9 +62,9 @@ const CameraModal: React.FC<CameraModalProps> = ({
         } catch (error) {
             console.error('Error getting devices:', error);
         }
-    };
+    }, [isSelfie]);
 
-    const startCamera = async () => {
+    const startCamera = useCallback(async () => {
         try {
             const constraints = {
                 video: {
@@ -103,15 +87,37 @@ const CameraModal: React.FC<CameraModalProps> = ({
             console.error('Error starting camera:', error);
             alert('Unable to access camera. Please check permissions.');
         }
-    };
+    }, [mode, selectedDeviceId]);
 
-    const stopCamera = () => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
+    useEffect(() => {
+        if (isOpen) {
+            getDevices();
+        } else {
+            stopCamera();
+            setPreview(null);
+            setCountdown(10);
         }
-        setCameraStarted(false);
-    };
+
+        return () => {
+            stopCamera();
+        };
+    }, [isOpen, getDevices, stopCamera]);
+
+    useEffect(() => {
+        if (selectedDeviceId && isOpen) {
+            startCamera();
+        }
+    }, [selectedDeviceId, isOpen, startCamera]);
+
+    useEffect(() => {
+        if (mode === 'video' && isRecording && countdown > 0) {
+            const timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+        if (countdown === 0 && isRecording) {
+            stopRecording();
+        }
+    }, [countdown, isRecording, mode, stopRecording]);
 
     const capturePhoto = () => {
         if (!videoRef.current || !canvasRef.current) return;
@@ -133,7 +139,7 @@ const CameraModal: React.FC<CameraModalProps> = ({
     const startRecording = () => {
         if (!streamRef.current) return;
 
-        setRecordedChunks([]);
+        const chunks: Blob[] = [];
         const options = { mimeType: 'video/webm; codecs=vp9' };
         
         try {
@@ -142,12 +148,12 @@ const CameraModal: React.FC<CameraModalProps> = ({
 
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
-                    setRecordedChunks(prev => [...prev, event.data]);
+                    chunks.push(event.data);
                 }
             };
 
             mediaRecorder.onstop = () => {
-                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const blob = new Blob(chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
                 setPreview(url);
             };
@@ -177,9 +183,6 @@ const CameraModal: React.FC<CameraModalProps> = ({
     const handleReject = () => {
         setPreview(null);
         setCountdown(10);
-        if (mode === 'video') {
-            setRecordedChunks([]);
-        }
     };
 
     const handleClose = () => {

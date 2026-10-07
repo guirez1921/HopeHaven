@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import Webcam from 'react-webcam';
 import { FaceDetection } from '@mediapipe/face_detection';
 import { Camera } from '@mediapipe/camera_utils';
@@ -18,7 +18,6 @@ const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCapture, i
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [isRecording, setIsRecording] = useState(false);
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-    const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
     const [faceFound, setFaceFound] = useState(false);
     const [countdown, setCountdown] = useState(10);
     // const [mode, setMode] = useState<'photo' | 'video'>('photo');
@@ -104,6 +103,11 @@ const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCapture, i
         };
     }, [isOpen]);
 
+    const stopRecording = useCallback(() => {
+        mediaRecorder?.stop();
+        setIsRecording(false);
+    }, [mediaRecorder]);
+
     useEffect(() => {
         if (mode === 'video' && isRecording && faceFound && countdown > 0) {
             const timer = setTimeout(() => setCountdown(prev => prev - 1), 1000);
@@ -112,30 +116,27 @@ const CameraModal: React.FC<CameraModalProps> = ({ isOpen, onClose, onCapture, i
         if (countdown === 0 && isRecording) {
             stopRecording();
         }
-    }, [countdown, faceFound, isRecording]);
+    }, [countdown, faceFound, isRecording, mode, stopRecording]);
 
     const startRecording = () => {
-        setRecordedChunks([]);
         const stream = webcamRef.current?.stream;
         if (!stream) return;
 
+        const chunks: Blob[] = [];
         const recorder = new MediaRecorder(stream);
         recorder.ondataavailable = e => {
-            if (e.data.size > 0) setRecordedChunks(prev => [...prev, e.data]);
+            if (e.data.size > 0) {
+                chunks.push(e.data);
+            }
         };
         recorder.onstop = () => {
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const blob = new Blob(chunks, { type: 'video/webm' });
             setPreview(URL.createObjectURL(blob));
         };
         recorder.start();
         setMediaRecorder(recorder);
         setIsRecording(true);
         setCountdown(10);
-    };
-
-    const stopRecording = () => {
-        mediaRecorder?.stop();
-        setIsRecording(false);
     };
 
     const capturePhoto = () => {
