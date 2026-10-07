@@ -475,13 +475,15 @@ const ApplicationPortal = () => {
   // Backend URL from env with fallback to production backend server
   const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
 
-  const uploadFile = async (file: File, folder: string) => {
+  const uploadFile = async (file: File, folder: string, uniqueId: string, fieldName: string) => {
     if (!file) throw new Error('File is required for upload');
 
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('folder', folder);
+      formData.append('uniqueId', uniqueId);
+      formData.append('fieldName', fieldName);
 
       const response = await fetch(`${BACKEND_URL}/api/upload`, {
         method: 'POST',
@@ -528,40 +530,55 @@ const ApplicationPortal = () => {
     setShowProgressModal(true);
 
     try {
-      // 1. Collect all document files
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const cloudinaryFolder = `hopehaven/${formData.firstName}_${timestamp}`;
+      // 1. Generate unique application ID on backend so all files in this submission share the same uniqueId
+      let uniqueId = '';
+      try {
+        const idRes = await fetch(`${BACKEND_URL}/api/application-id`);
+        if (idRes.ok) {
+          const idData = await idRes.json();
+          uniqueId = idData.uniqueId;
+        }
+      } catch {
+        // Fallback random hex if offline
+        uniqueId = Math.random().toString(36).substring(2, 10);
+      }
+      if (!uniqueId) {
+        uniqueId = Math.random().toString(36).substring(2, 10);
+      }
 
+      const cloudinaryFolder = `hopehaven/${uniqueId}`;
       setProgress(10);
 
+      // Collect all document files with snake_case field names (e.g. government_id_front)
       const documentFiles: { file: File, fieldName: string }[] = [];
-      if (formData.governmentIdFront) documentFiles.push({ file: formData.governmentIdFront, fieldName: 'governmentIdFront' });
-      if (formData.governmentIdBack) documentFiles.push({ file: formData.governmentIdBack, fieldName: 'governmentIdBack' });
-      if (formData.biodataImage) documentFiles.push({ file: formData.biodataImage, fieldName: 'biodataImage' });
-      if (formData.biodataVideo) documentFiles.push({ file: formData.biodataVideo, fieldName: 'biodataVideo' });
-      if (formData.randomPicture) documentFiles.push({ file: formData.randomPicture, fieldName: 'randomPicture' });
+      if (formData.governmentIdFront) documentFiles.push({ file: formData.governmentIdFront, fieldName: 'government_id_front' });
+      if (formData.governmentIdBack) documentFiles.push({ file: formData.governmentIdBack, fieldName: 'government_id_back' });
+      if (formData.biodataImage) documentFiles.push({ file: formData.biodataImage, fieldName: 'biodata_image' });
+      if (formData.biodataVideo) documentFiles.push({ file: formData.biodataVideo, fieldName: 'biodata_video' });
+      if (formData.randomPicture) documentFiles.push({ file: formData.randomPicture, fieldName: 'random_picture' });
 
       if (documentFiles.length === 0) {
         throw new Error('No files to upload. Please add required documents.');
       }
 
-      // 2. Upload all files to Cloudinary
-      const uploadedFiles: { name: string; url: string; id: string; fieldName: string }[] = [];
+      // 2. Upload all files to Cloudinary using same uniqueId (resulting in fieldName_{uniqueId})
+      const uploadedFiles: { name: string; url: string; id: string; uniqueId: string; fieldName: string }[] = [];
       const progressPerFile = 80 / documentFiles.length;
 
       for (let i = 0; i < documentFiles.length; i++) {
         try {
           const { file, fieldName } = documentFiles[i];
-          const fileName = file.name || `${fieldName}_${Date.now()}`;
+          const fileName = file.name || `${fieldName}_${uniqueId}`;
           const fileToUpload = new File([file], fileName, { type: file.type || 'application/octet-stream' });
 
-          const uploadedFile = await uploadFile(fileToUpload, cloudinaryFolder);
+          const uploadedFile = await uploadFile(fileToUpload, cloudinaryFolder, uniqueId, fieldName);
 
           uploadedFiles.push({
-            name: uploadedFile.name,
+            name: uploadedFile.name, // e.g. government_id_front_{uniqueId}
             url: uploadedFile.url,
             id: uploadedFile.id,
-            fieldName
+            uniqueId: uniqueId,
+            fieldName: fieldName
           });
           setProgress(10 + (i + 1) * progressPerFile);
         } catch (error: unknown) {
@@ -576,9 +593,10 @@ const ApplicationPortal = () => {
 
       setProgress(100);
 
-      // 5. Prepare log data with ALL form fields
+      // 5. Prepare log data with ALL form fields and consistent uniqueId
       const logData = {
         timestamp: new Date().toISOString(),
+        uniqueId: uniqueId,
         formData: {
           firstName: formData.firstName,
           lastName: formData.lastName,
@@ -601,7 +619,7 @@ const ApplicationPortal = () => {
         },
         folder: {
           name: cloudinaryFolder,
-          id: cloudinaryFolder,
+          id: uniqueId,
           url: ''
         },
         files: uploadedFiles

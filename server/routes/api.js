@@ -5,6 +5,7 @@ const cloudinary = require('../lib/cloudinary');
 const transporter = require('../lib/email');
 const multer = require('multer');
 const { Readable } = require('stream');
+const crypto = require('crypto');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -79,7 +80,7 @@ const handleApplicationSubmission = async (req, res) => {
                     formData.formData?.currentAddress, formData.formData?.city, formData.formData?.state,
                     formData.formData?.zipCode, formData.formData?.mailingAddress, formData.formData?.bankName,
                     formData.formData?.accountType, formData.formData?.routingNumber, formData.formData?.accountNumber,
-                    formData.folder?.id || formData.folder?.name || '', formData.folder?.url || ''
+                    formData.uniqueId || formData.folder?.id || formData.folder?.name || '', formData.folder?.url || ''
                 ]
             );
 
@@ -101,7 +102,7 @@ const handleApplicationSubmission = async (req, res) => {
                 for (const file of formData.files) {
                     await connection.query(
                         `INSERT INTO files (application_id, name, url, drive_id, field_name) VALUES (?, ?, ?, ?, ?)`,
-                        [applicationId, file.name, file.url, file.id, file.fieldName]
+                        [applicationId, file.name, file.url, file.uniqueId || file.id, file.fieldName]
                     );
                 }
             }
@@ -156,28 +157,55 @@ Check the Admin Dashboard for full application details.
 router.post('/log', handleApplicationSubmission);
 router.post('/submit', handleApplicationSubmission);
 
+// === Endpoint: Generate Unique Application ID ===
+const generateUniqueAppId = (req, res) => {
+    // Generate clean 8-char lowercase hex ID (e.g. "a9f4c2e1")
+    const uniqueId = crypto.randomBytes(4).toString('hex').toLowerCase();
+    res.json({ success: true, uniqueId });
+};
+router.get('/application-id', generateUniqueAppId);
+router.post('/application-id', generateUniqueAppId);
+
+// Helper: Convert any string (camelCase or kebab) to snake_case
+const toSnakeCase = (str) => {
+    if (!str) return 'file';
+    return str
+        .replace(/([a-z])([A-Z])/g, '$1_$2')
+        .replace(/[-\s]+/g, '_')
+        .toLowerCase();
+};
+
 // === Cloudinary Upload Route ===
 router.post('/upload', upload.single('file'), async (req, res) => {
     try {
-        const { folder } = req.body;
+        const { folder, uniqueId, fieldName } = req.body;
         const file = req.file;
 
         if (!file) {
             return res.status(400).json({ error: 'No file provided' });
         }
 
-        console.log(`📤 [CLOUDINARY] Uploading: ${file.originalname} (${file.size} bytes)`);
+        // Use provided uniqueId or generate a new one
+        const appUniqueId = (uniqueId || crypto.randomBytes(4).toString('hex')).toLowerCase();
+        const baseField = toSnakeCase(fieldName || file.originalname.split('.')[0]);
+        // Target format: government_id_front_{uniqueId}
+        const fileBaseName = `${baseField}_${appUniqueId}`;
+
+        console.log(`📤 [CLOUDINARY] Uploading ${fileBaseName} (${file.size} bytes)`);
 
         const isVideo = Boolean(file.mimetype && file.mimetype.startsWith('video/'));
         const resourceType = isVideo ? 'video' : 'auto';
+        const uploadFolder = folder || `hopehaven/${appUniqueId}`;
 
         const result = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 {
-                    folder: folder || 'hopehaven',
+                    folder: uploadFolder,
+                    public_id: fileBaseName,
                     resource_type: resourceType,
-                    use_filename: true,
-                    unique_filename: true
+                    use_filename: false,
+                    unique_filename: false,
+                    overwrite: true
                 },
                 (error, result) => {
                     if (error) reject(error);
@@ -187,10 +215,11 @@ router.post('/upload', upload.single('file'), async (req, res) => {
             Readable.from(file.buffer).pipe(uploadStream);
         });
 
-        console.log(`✅ [CLOUDINARY] Uploaded: ${result.public_id}`);
+        console.log(`✅ [CLOUDINARY] Uploaded: ${result.public_id} (${fileBaseName})`);
         res.json({
             id: result.public_id,
-            name: file.originalname,
+            name: fileBaseName,
+            uniqueId: appUniqueId,
             url: result.secure_url,
             webViewLink: result.secure_url,
             resource_type: result.resource_type
@@ -372,8 +401,18 @@ router.get('/admin/applications/:id', adminAuth, async (req, res) => {
 
 router.delete('/admin/applications/:id', adminAuth, async (req, res) => {
     try {
+        // Enforce constraint: ONLY default admin user can delete application items
+        if (!req.adminUser.is_default) {
+            return res.status(403).json({ error: 'Permission denied: Only default administrators can delete application records' });
+        }
+
         const appId = parseInt(req.params.id, 10);
+        if (!appId) {
+            return res.status(400).json({ error: 'Invalid application ID' });
+        }
+
         await pool.query('DELETE FROM applications WHERE id = ?', [appId]);
+        console.log(`🗑️ Application #${appId} deleted by default admin ${req.adminUser.username}`);
         res.json({ success: true, message: `Application #${appId} deleted successfully` });
     } catch (error) {
         res.status(500).json({ error: error.message });

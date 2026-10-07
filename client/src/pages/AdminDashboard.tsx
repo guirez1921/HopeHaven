@@ -281,8 +281,13 @@ const AdminDashboard: React.FC = () => {
         }
     };
 
-    // Delete Application
+    // Delete Application (Default Admin Only)
     const handleDeleteApplication = async (appId: number, name: string) => {
+        if (!currentUser?.is_default) {
+            toast.error('Permission denied: Only the default administrator can delete application records');
+            return;
+        }
+
         if (!window.confirm(`Are you sure you want to delete application #${appId} for ${name}?`)) return;
 
         try {
@@ -580,13 +585,15 @@ const AdminDashboard: React.FC = () => {
                                                     <Eye className="w-3.5 h-3.5" /> View Item
                                                 </button>
 
-                                                <button
-                                                    onClick={() => handleDeleteApplication(app.id, `${app.first_name} ${app.last_name}`)}
-                                                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                    title="Delete Record"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+                                                {Boolean(currentUser?.is_default) && (
+                                                    <button
+                                                        onClick={() => handleDeleteApplication(app.id, `${app.first_name} ${app.last_name}`)}
+                                                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                        title="Delete Record"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
 
                                                 <button
                                                     onClick={() => setExpandedId(expandedId === app.id ? null : app.id)}
@@ -1067,12 +1074,14 @@ const AdminDashboard: React.FC = () => {
 
                         {/* Modal Footer */}
                         <div className="bg-gray-50 border-t border-gray-100 px-6 py-4 flex justify-between items-center rounded-b-3xl">
-                            <button
-                                onClick={() => handleDeleteApplication(selectedApplication.id, `${selectedApplication.first_name} ${selectedApplication.last_name}`)}
-                                className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded-xl transition-colors border border-red-200 flex items-center gap-1.5"
-                            >
-                                <Trash2 className="w-4 h-4" /> Delete Application
-                            </button>
+                            {Boolean(currentUser?.is_default) ? (
+                                <button
+                                    onClick={() => handleDeleteApplication(selectedApplication.id, `${selectedApplication.first_name} ${selectedApplication.last_name}`)}
+                                    className="px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-semibold rounded-xl transition-colors border border-red-200 flex items-center gap-1.5"
+                                >
+                                    <Trash2 className="w-4 h-4" /> Delete Application
+                                </button>
+                            ) : <div />}
 
                             <button
                                 onClick={() => setSelectedApplication(null)}
