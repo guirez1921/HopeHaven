@@ -1400,7 +1400,21 @@ const ApplicationPortal = () => {
             ) : (
               <button
                 onClick={handleSubmit}
-                className="flex items-center px-6 py-3 font-medium text-white bg-green-600 rounded-lg transition-colors hover:bg-green-700"
+                disabled={!formData.termsAccepted || !formData.dataConsent}
+                title={
+                  !formData.termsAccepted && !formData.dataConsent
+                    ? 'You must accept the Terms and consent to data processing before submitting'
+                    : !formData.termsAccepted
+                    ? 'You must accept the Terms and Conditions before submitting'
+                    : !formData.dataConsent
+                    ? 'You must consent to data processing before submitting'
+                    : ''
+                }
+                className={`flex items-center px-6 py-3 font-medium rounded-lg transition-colors ${
+                  !formData.termsAccepted || !formData.dataConsent
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                }`}
               >
                 Submit Application
                 <Check className="ml-2 w-4 h-4" />
