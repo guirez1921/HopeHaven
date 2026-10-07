@@ -119,7 +119,7 @@ const AdminDashboard: React.FC = () => {
     // Copy Feedback
     const [copiedField, setCopiedField] = useState<string | null>(null);
 
-    const backendUrl = import.meta.env.VITE_BACKEND_URL;
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
 
     const handleLogout = useCallback(() => {
         sessionStorage.removeItem('adminAuth');

@@ -407,8 +407,8 @@ const ApplicationPortal = () => {
     setCurrentStep(prev => Math.max(prev - 1, 1));
   };
 
-  // Backend URL from env — no fallback
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+  // Backend URL from env with fallback to production backend server
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://hope-haven-server.vercel.app';
 
   const uploadFile = async (file: File, folder: string) => {
     if (!file) throw new Error('File is required for upload');
