@@ -151,6 +151,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         console.log(`📤 [CLOUDINARY] Uploading: ${file.originalname} (${file.size} bytes)`);
 
+        const isVideo = Boolean(file.mimetype && file.mimetype.startsWith('video/'));
         const resourceType = isVideo ? 'video' : 'auto';
 
         const result = await new Promise((resolve, reject) => {
