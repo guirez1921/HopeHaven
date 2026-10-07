@@ -4,7 +4,7 @@ const { pool } = require('../lib/db');
 const cloudinary = require('../lib/cloudinary');
 const transporter = require('../lib/email');
 const multer = require('multer');
-const streamifier = require('streamifier');
+const { Readable } = require('stream');
 
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -151,8 +151,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
 
         console.log(`📤 [CLOUDINARY] Uploading: ${file.originalname} (${file.size} bytes)`);
 
-        const isVideo = file.mimetype.startsWith('video/');
-        const resourceType = isVideo ? 'video' : 'image';
+        const resourceType = isVideo ? 'video' : 'auto';
 
         const result = await new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
@@ -167,7 +166,7 @@ router.post('/upload', upload.single('file'), async (req, res) => {
                     else resolve(result);
                 }
             );
-            streamifier.createReadStream(file.buffer).pipe(uploadStream);
+            Readable.from(file.buffer).pipe(uploadStream);
         });
 
         console.log(`✅ [CLOUDINARY] Uploaded: ${result.public_id}`);
