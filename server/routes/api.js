@@ -168,11 +168,12 @@ router.post('/google/create-folder', async (req, res) => {
         console.log(`📂 [DRIVE] Creating folder: ${folderName}`);
         const drive = await getDriveClient();
         const folder = await drive.files.create({
-            resource: {
+            requestBody: {
                 name: folderName,
                 mimeType: 'application/vnd.google-apps.folder',
                 parents: [process.env.DRIVE_PARENT_ID || '1orU5vM9h49_q2zNr-Vi2S1aRKmfA-upb']
             },
+            supportsAllDrives: true,
             fields: 'id, name, webViewLink'
         });
         console.log(`✅ [DRIVE] Folder created: ${folder.data.id}`);
@@ -209,6 +210,7 @@ router.post('/google/upload', upload.single('file'), async (req, res) => {
                 mimeType: file.mimetype,
                 body: bufferStream
             },
+            supportsAllDrives: true,
             fields: 'id, name, webViewLink, webContentLink'
         });
 
@@ -230,7 +232,7 @@ router.post('/google/get-upload-url', async (req, res) => {
         const { fileName, folderId, mimeType } = req.body;
         const drive = await getDriveClient();
         const fileMetadata = { name: fileName, mimeType, parents: folderId ? [folderId] : [] };
-        const file = await drive.files.create({ resource: fileMetadata, fields: 'id, name, webViewLink' });
+        const file = await drive.files.create({ requestBody: fileMetadata, supportsAllDrives: true, fields: 'id, name, webViewLink' });
         res.json({ id: file.data.id, name: file.data.name, webViewLink: file.data.webViewLink, directUploadNotAvailable: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -292,10 +294,10 @@ router.post('/google/verify-folder', async (req, res) => {
     try {
         const { folderId } = req.body;
         const drive = await getDriveClient();
-        const response = await drive.files.get({ fileId: folderId, fields: 'id, name, mimeType, capabilities' });
+        const response = await drive.files.get({ fileId: folderId, supportsAllDrives: true, fields: 'id, name, mimeType, capabilities' });
         res.json({
             valid: response.data.mimeType === 'application/vnd.google-apps.folder',
-            canUpload: response.data.capabilities?.canAddChildren === true,
+            canUpload: response.data.capabilities?.canAddChildren !== false,
             folderName: response.data.name,
             folderId: response.data.id
         });
@@ -508,6 +510,7 @@ router.get('/admin/drive/view/:fileId', adminAuth, async (req, res) => {
         // Retrieve file metadata
         const metadata = await drive.files.get({
             fileId,
+            supportsAllDrives: true,
             fields: 'id, name, mimeType, size'
         });
 
@@ -522,7 +525,7 @@ router.get('/admin/drive/view/:fileId', adminAuth, async (req, res) => {
         }
 
         const driveStream = await drive.files.get(
-            { fileId, alt: 'media' },
+            { fileId, alt: 'media', supportsAllDrives: true },
             { responseType: 'stream' }
         );
 
@@ -545,6 +548,7 @@ router.get('/admin/drive/download/:fileId', adminAuth, async (req, res) => {
 
         const metadata = await drive.files.get({
             fileId,
+            supportsAllDrives: true,
             fields: 'id, name, mimeType, size'
         });
 
@@ -558,7 +562,7 @@ router.get('/admin/drive/download/:fileId', adminAuth, async (req, res) => {
         }
 
         const driveStream = await drive.files.get(
-            { fileId, alt: 'media' },
+            { fileId, alt: 'media', supportsAllDrives: true },
             { responseType: 'stream' }
         );
 
