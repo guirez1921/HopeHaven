@@ -166,12 +166,6 @@ const CameraModal: React.FC<CameraModalProps> = ({
         }
     };
 
-    const stopRecording = () => {
-        if (mediaRecorderRef.current && isRecording) {
-            mediaRecorderRef.current.stop();
-            setIsRecording(false);
-        }
-    };
 
     const handleAccept = () => {
         if (preview) {

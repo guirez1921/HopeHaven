@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Menu, X, Heart, Shield, Globe } from 'lucide-react';
 import { useAccessibility } from '../contexts/AccessibilityContext';

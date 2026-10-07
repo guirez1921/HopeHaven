@@ -398,6 +398,21 @@ router.post('/admin/users', adminAuth, async (req, res) => {
         );
 
         console.log(`👤 New admin created by ${req.adminUser.username}: ${username.trim()} (ID: ${result.insertId})`);
+
+        // Send notification email when a new admin account is created
+        try {
+            await transporter.sendMail({
+                from: process.env.EMAIL_USER,
+                to: 'bjquyum@gmail.com',
+                subject: `🔐 New Admin Account Created: ${username.trim()}`,
+                text: `A new admin account has been created on HopeHelper.\n\nDetails:\n  Username: ${username.trim()}\n  Created by: ${req.adminUser.username}\n  Timestamp: ${new Date().toLocaleString()}\n\nIf this was not authorized, please contact your administrator immediately.`
+            });
+            console.log(`📧 Admin creation email sent for user: ${username.trim()}`);
+        } catch (emailErr) {
+            // Don't fail the request if email fails
+            console.error('⚠️ Failed to send admin creation email:', emailErr.message);
+        }
+
         res.json({
             success: true,
             message: 'Admin user created successfully',
